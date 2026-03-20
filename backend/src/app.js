@@ -8,11 +8,18 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
-app.use(helmet());
-
-app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN,
+const corsOptions = {
+  origin: process.env.ALLOWED_ORIGIN || '*',
   credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
+
+app.use(helmet({
+  crossOriginResourcePolicy: false,
 }));
 
 app.use(express.json());
