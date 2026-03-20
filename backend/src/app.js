@@ -8,8 +8,10 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
+const allowedOrigin = (process.env.ALLOWED_ORIGIN || '').trim().replace(/['"]/g, '');
+
 const corsOptions = {
-  origin: process.env.ALLOWED_ORIGIN || '*',
+  origin: allowedOrigin || true,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
