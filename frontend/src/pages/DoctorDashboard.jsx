@@ -50,6 +50,7 @@ export default function DoctorDashboard() {
 
   const [decisionPanel, setDecisionPanel] = useState([]);
   const [panelLoading, setPanelLoading] = useState(false);
+  const [panelError, setPanelError] = useState('');
 
   // Voice / transcript
   const [transcript, setTranscript] = useState('');
@@ -152,6 +153,7 @@ export default function DoctorDashboard() {
     setTranscript('');
     setDecisionPanel([]);
     setCaseError('');
+    setPanelError('');
     setCaseLoading(true);
     setPanelLoading(true);
 
@@ -172,14 +174,24 @@ export default function DoctorDashboard() {
       }
 
       // Trigger decision panel generation
-      client.post('/api/consultation/panel', { visitId: loadedVisit.id })
-        .catch(() => {})
-        .finally(() => setPanelLoading(false));
+      triggerPanel(loadedVisit.id);
     } catch {
       setCaseError('Failed to load patient case. Please try again.');
       setPanelLoading(false);
     } finally {
       setCaseLoading(false);
+    }
+  }
+
+  async function triggerPanel(visitId) {
+    setPanelLoading(true);
+    setPanelError('');
+    try {
+      await client.post('/api/consultation/panel', { visitId });
+    } catch (err) {
+      setPanelError(err.response?.data?.error || 'Failed to generate insights. Click Retry.');
+    } finally {
+      setPanelLoading(false);
     }
   }
 
@@ -441,8 +453,26 @@ export default function DoctorDashboard() {
                   <div className="w-5 h-5 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
                   <p className="text-xs text-gray-400">Generating insights…</p>
                 </div>
+              ) : panelError ? (
+                <div className="flex flex-col items-center pt-6 gap-3 px-2">
+                  <p className="text-xs text-red-500 text-center">{panelError}</p>
+                  <button
+                    onClick={() => visit?.id && triggerPanel(visit.id)}
+                    className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+                  >
+                    Retry
+                  </button>
+                </div>
               ) : decisionPanel.length === 0 ? (
-                <p className="text-center text-gray-400 text-xs pt-6">No insights available</p>
+                <div className="flex flex-col items-center pt-6 gap-3 px-2">
+                  <p className="text-xs text-gray-400 text-center">No insights generated yet.</p>
+                  <button
+                    onClick={() => visit?.id && triggerPanel(visit.id)}
+                    className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+                  >
+                    Generate Insights
+                  </button>
+                </div>
               ) : (
                 <ul className="space-y-3">
                   {decisionPanel.map((insight, i) => (
