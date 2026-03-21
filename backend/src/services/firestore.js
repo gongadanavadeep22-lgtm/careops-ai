@@ -1,4 +1,4 @@
-git commit -m "feat: build Doctor Dashboard with SOAP notes, AI decision panel, emergency banner"const admin = require('firebase-admin');
+const admin = require('firebase-admin');
 
 if (!admin.apps.length) {
   const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
