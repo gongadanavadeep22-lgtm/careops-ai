@@ -70,10 +70,10 @@ Format: ["insight one","insight two","insight three"]`;
     const text = result.response.text();
     const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
     const parsed = JSON.parse(cleaned);
-    if (!Array.isArray(parsed) || parsed.length !== 3) {
+    if (!Array.isArray(parsed) || parsed.length === 0) {
       return ['Review patient history carefully', 'Check current vitals', 'Consider allergies before prescribing'];
     }
-    return parsed;
+    return parsed.slice(0, 5);
   } catch (error) {
     console.error('Gemini panel error:', error.message);
     return ['Review patient history carefully', 'Check current vitals', 'Consider allergies before prescribing'];
