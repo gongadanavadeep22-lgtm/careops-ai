@@ -26,6 +26,15 @@ export default function PatientDashboard() {
   const [profileLoading, setProfileLoading] = useState(true);
   const fileInputRef = useRef(null);
 
+  // Appointment tab state
+  const [doctors, setDoctors] = useState([]);
+  const [doctorsLoading, setDoctorsLoading] = useState(false);
+  const [profileReady, setProfileReady] = useState(false);
+  const [apptForm, setApptForm] = useState({ doctorId: '', scheduledAt: '', apptSymptoms: '' });
+  const [apptLoading, setApptLoading] = useState(false);
+  const [apptStatus, setApptStatus] = useState('');
+  const [apptError, setApptError] = useState('');
+
   // Load existing profile on mount
   useEffect(() => {
     async function loadProfile() {
@@ -64,6 +73,64 @@ export default function PatientDashboard() {
       setTimeout(() => setSaveStatus(''), 3000);
     } catch (err) {
       setSaveError(err.response?.data?.error || 'Failed to save. Please try again.');
+    }
+  }
+
+  useEffect(() => {
+    if (activeSection !== 'Appointment') return;
+
+    async function loadApptData() {
+      setDoctorsLoading(true);
+      try {
+        const [profileRes, doctorsRes] = await Promise.all([
+          client.get('/api/patients/profile'),
+          client.get('/api/doctors'),
+        ]);
+        setProfileReady(!!(profileRes.data?.name));
+        setDoctors(doctorsRes.data?.doctors || []);
+      } catch {
+        setProfileReady(false);
+      } finally {
+        setDoctorsLoading(false);
+      }
+    }
+
+    loadApptData();
+  }, [activeSection]);
+
+  async function handleApptSubmit(e) {
+    e.preventDefault();
+    setApptStatus('');
+    setApptError('');
+
+    if (!apptForm.doctorId) return setApptError('Please select a doctor.');
+    if (!apptForm.scheduledAt) return setApptError('Please select a date and time.');
+    if (!apptForm.apptSymptoms || apptForm.apptSymptoms.trim().length < 10) {
+      return setApptError('Please describe your symptoms (minimum 10 characters).');
+    }
+
+    setApptLoading(true);
+    try {
+      const { data: patient } = await client.get('/api/patients/profile');
+      const selectedDoctor = doctors.find((d) => d.id === apptForm.doctorId);
+
+      await client.post('/api/appointments/book', {
+        patientId: patient.uid || '',
+        patientName: patient.name || '',
+        patientPhone: patient.phone || '',
+        patientArea: patient.area || '',
+        doctorId: selectedDoctor?.uid || apptForm.doctorId,
+        doctorName: selectedDoctor?.name || '',
+        scheduledAt: apptForm.scheduledAt,
+        symptoms: apptForm.apptSymptoms.trim(),
+      });
+
+      setApptStatus('Appointment booked successfully. Doctor will confirm shortly.');
+      setApptForm({ doctorId: '', scheduledAt: '', apptSymptoms: '' });
+    } catch (err) {
+      setApptError(err.response?.data?.error || 'Booking failed. Please try again.');
+    } finally {
+      setApptLoading(false);
     }
   }
 
@@ -216,41 +283,84 @@ export default function PatientDashboard() {
             </div>
           )}
 
-          {/* ── APPOINTMENT SECTION ── */}
-          {activeSection === 'Appointment' && (
-            <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
-              <h2 className="text-lg font-semibold text-gray-700">Book Appointment</h2>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-600 mb-1">Preferred Appointment Date</label>
-                <input
-                  type="date"
-                  name="appointmentDate"
-                  value={form.appointmentDate}
-                  onChange={handleChange}
-                  min={new Date().toISOString().split('T')[0]}
-                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                />
-              </div>
-
-              {form.appointmentDate && (
-                <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-blue-700">
-                  Appointment requested for:{' '}
-                  <strong>
-                    {new Date(form.appointmentDate).toLocaleDateString('en-IN', {
-                      weekday: 'long',
-                      year: 'numeric',
-                      month: 'long',
-                      day: 'numeric',
-                    })}
-                  </strong>
-                </div>
-              )}
-
-              <SaveBar status={saveStatus} error={saveError} />
-            </div>
-          )}
         </form>
+
+        {/* ── APPOINTMENT SECTION ── */}
+        {activeSection === 'Appointment' && (
+          <div className="bg-white rounded-xl shadow-sm p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-700">Book Appointment</h2>
+
+            {doctorsLoading ? (
+              <div className="flex justify-center py-6">
+                <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+              </div>
+            ) : !profileReady ? (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm text-yellow-700">
+                Please save your profile first before booking an appointment.
+              </div>
+            ) : (
+              <form onSubmit={handleApptSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Select Doctor *</label>
+                  <select
+                    value={apptForm.doctorId}
+                    onChange={(e) => setApptForm((prev) => ({ ...prev, doctorId: e.target.value }))}
+                    required
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  >
+                    <option value="">-- Select a doctor --</option>
+                    {doctors.map((doc) => (
+                      <option key={doc.id} value={doc.id}>{doc.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">Date &amp; Time *</label>
+                  <input
+                    type="datetime-local"
+                    value={apptForm.scheduledAt}
+                    min={new Date().toISOString().slice(0, 16)}
+                    onChange={(e) => setApptForm((prev) => ({ ...prev, scheduledAt: e.target.value }))}
+                    required
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-600 mb-1">What are you feeling today? *</label>
+                  <textarea
+                    value={apptForm.apptSymptoms}
+                    onChange={(e) => setApptForm((prev) => ({ ...prev, apptSymptoms: e.target.value }))}
+                    placeholder="Describe your symptoms (minimum 10 characters)"
+                    rows={4}
+                    required
+                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                  />
+                </div>
+
+                {apptStatus && (
+                  <p className="text-sm text-green-600 bg-green-50 border border-green-200 rounded px-3 py-2">
+                    {apptStatus}
+                  </p>
+                )}
+                {apptError && (
+                  <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                    {apptError}
+                  </p>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={apptLoading}
+                  className="bg-blue-600 text-white px-5 py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {apptLoading ? 'Booking…' : 'Book Appointment'}
+                </button>
+              </form>
+            )}
+          </div>
+        )}
 
         {/* ── LAB REPORTS SECTION ── */}
         {activeSection === 'Lab Reports' && (

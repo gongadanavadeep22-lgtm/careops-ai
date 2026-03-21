@@ -29,6 +29,8 @@ app.use('/api/auth', authRoutes);
 app.use('/api/patients', patientRoutes);
 app.use('/api/doctors', require('./routes/doctors'));
 app.use('/api/appointments', require('./routes/appointments'));
+app.use('/api/checkin', require('./routes/checkin'));
+app.use('/api/vitals', require('./routes/vitals'));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'CareOps API', timestamp: new Date().toISOString() });
