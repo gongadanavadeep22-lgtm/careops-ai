@@ -4,10 +4,10 @@ import Navbar from '../components/Navbar';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
 
-const VIEWS = ['Today\'s Appointments', 'Book Appointment'];
+const VIEWS = ['Upcoming Appointments', 'Book Appointment'];
 
 export default function NurseDashboard() {
-  const [activeView, setActiveView] = useState('Today\'s Appointments');
+  const [activeView, setActiveView] = useState('Upcoming Appointments');
 
   // ── TODAY'S APPOINTMENTS STATE ──
   const [appointments, setAppointments] = useState([]);
@@ -140,6 +140,7 @@ export default function NurseDashboard() {
 
       setBookStatus('Appointment booked.');
       setBookForm({ patientName: '', patientPhone: '', patientArea: '', doctorId: '', scheduledAt: '', symptoms: '' });
+      setActiveView('Upcoming Appointments');
       loadTodayAppointments();
     } catch (err) {
       setBookError(err.response?.data?.error || 'Booking failed. Please try again.');
@@ -154,10 +155,16 @@ export default function NurseDashboard() {
     return 'bg-green-100 text-green-700 border border-green-300';
   }
 
-  function formatTime(scheduledAt) {
+  function formatDateTime(scheduledAt) {
     if (!scheduledAt) return '';
     const d = scheduledAt?.toDate ? scheduledAt.toDate() : new Date(scheduledAt);
-    return d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    const today = new Date();
+    const isToday = d.toDateString() === today.toDateString();
+    if (isToday) {
+      return 'Today ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) + ' ' +
+      d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
   }
 
   return (
@@ -202,7 +209,7 @@ export default function NurseDashboard() {
         </div>
 
         {/* ── TODAY'S APPOINTMENTS VIEW ── */}
-        {activeView === "Today's Appointments" && (
+        {activeView === "Upcoming Appointments" && (
           <div>
             {apptLoading ? (
               <LoadingSpinner />
@@ -210,7 +217,7 @@ export default function NurseDashboard() {
               <ErrorMessage message={apptError} onRetry={loadTodayAppointments} />
             ) : appointments.length === 0 ? (
               <div className="bg-white rounded-xl shadow-sm p-10 text-center">
-                <p className="text-gray-400 text-sm">No appointments scheduled for today</p>
+                <p className="text-gray-400 text-sm">No upcoming appointments</p>
               </div>
             ) : (
               <div className="space-y-4">
@@ -226,7 +233,7 @@ export default function NurseDashboard() {
                         <div className="flex-1">
                           <div className="flex items-center gap-2 flex-wrap">
                             <h3 className="font-semibold text-gray-800">{appt.patientName}</h3>
-                            <span className="text-xs text-gray-400">{formatTime(appt.scheduledAt)}</span>
+                            <span className="text-xs text-gray-400">{formatDateTime(appt.scheduledAt)}</span>
 
                             {/* Status badge */}
                             {appt.status === 'arrived' ? (

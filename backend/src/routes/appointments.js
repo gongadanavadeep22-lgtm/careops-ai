@@ -45,12 +45,11 @@ router.post('/book', verifyToken, async (req, res, next) => {
   }
 });
 
-// GET /api/appointments/today
+// GET /api/appointments/today — returns today + upcoming appointments
 router.get('/today', verifyToken, async (req, res, next) => {
   try {
     const now = new Date();
     const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
 
     const snapshot = await db
       .collection('appointments')
@@ -66,7 +65,7 @@ router.get('/today', verifyToken, async (req, res, next) => {
       }))
       .filter((appt) => {
         const d = new Date(appt.scheduledAt);
-        return d >= startOfDay && d <= endOfDay;
+        return d >= startOfDay && appt.status !== 'completed';
       })
       .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
 
