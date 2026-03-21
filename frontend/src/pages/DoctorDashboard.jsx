@@ -187,7 +187,10 @@ export default function DoctorDashboard() {
     setPanelLoading(true);
     setPanelError('');
     try {
-      await client.post('/api/consultation/panel', { visitId });
+      const { data } = await client.post('/api/consultation/panel', { visitId });
+      if (data.insights && data.insights.length > 0) {
+        setDecisionPanel(data.insights);
+      }
     } catch (err) {
       setPanelError(err.response?.data?.error || 'Failed to generate insights. Click Retry.');
     } finally {
