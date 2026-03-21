@@ -1,9 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot, doc, onSnapshot as docSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import client from '../api/client';
 import Navbar from '../components/Navbar';
-import LoadingSpinner from '../components/LoadingSpinner';
+// LoadingSpinner available if needed for future use
 import EmergencyBanner from '../components/EmergencyBanner';
 
 const URGENCY_ORDER = { EMERGENCY: 0, PRIORITY: 1, GENERAL: 2 };
@@ -26,7 +26,8 @@ function WaitTime({ createdAt }) {
   useEffect(() => {
     function calc() {
       if (!createdAt) return setDisplay('');
-      const diff = Math.floor((Date.now() - new Date(createdAt).getTime()) / 60000);
+      const ts = createdAt?.toDate ? createdAt.toDate() : new Date(createdAt);
+      const diff = Math.floor((Date.now() - ts.getTime()) / 60000);
       setDisplay(diff < 1 ? 'Just arrived' : `${diff}m waiting`);
     }
     calc();
@@ -70,16 +71,20 @@ export default function DoctorDashboard() {
   useEffect(() => {
     const q = query(
       collection(db, 'appointments'),
-      where('clinicId', '==', 'clinic-001'),
-      where('status', '==', 'arrived')
+      where('clinicId', '==', 'clinic-001')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const docs = snapshot.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((a) => a.status === 'arrived');
+
       docs.sort((a, b) => {
         const uDiff = (URGENCY_ORDER[a.urgency] ?? 2) - (URGENCY_ORDER[b.urgency] ?? 2);
         if (uDiff !== 0) return uDiff;
-        return new Date(a.createdAt) - new Date(b.createdAt);
+        const aTime = a.createdAt?.toDate ? a.createdAt.toDate() : new Date(a.createdAt || 0);
+        const bTime = b.createdAt?.toDate ? b.createdAt.toDate() : new Date(b.createdAt || 0);
+        return aTime - bTime;
       });
       setQueue(docs);
       setQueueLoading(false);
@@ -92,7 +97,7 @@ export default function DoctorDashboard() {
   useEffect(() => {
     if (!visit?.id) return;
 
-    const unsubscribe = docSnapshot(doc(db, 'visits', visit.id), (snap) => {
+    const unsubscribe = onSnapshot(doc(db, 'visits', visit.id), (snap) => {
       if (snap.exists()) {
         const panel = snap.data().decisionPanel || [];
         setDecisionPanel(panel);
