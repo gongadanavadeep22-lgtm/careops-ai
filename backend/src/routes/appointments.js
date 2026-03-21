@@ -57,15 +57,16 @@ router.get('/today', verifyToken, async (req, res, next) => {
       .where('clinicId', '==', 'clinic-001')
       .where('scheduledAt', '>=', startOfDay)
       .where('scheduledAt', '<=', endOfDay)
-      .orderBy('scheduledAt', 'asc')
       .get();
 
-    const appointments = snapshot.docs.map((doc) => ({
-      id: doc.id,
-      ...doc.data(),
-      scheduledAt: doc.data().scheduledAt?.toDate?.()?.toISOString() || doc.data().scheduledAt,
-      createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt,
-    }));
+    const appointments = snapshot.docs
+      .map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        scheduledAt: doc.data().scheduledAt?.toDate?.()?.toISOString() || doc.data().scheduledAt,
+        createdAt: doc.data().createdAt?.toDate?.()?.toISOString() || doc.data().createdAt,
+      }))
+      .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
 
     res.json({ appointments });
   } catch (err) {
