@@ -31,6 +31,10 @@ app.use('/api/doctors', require('./routes/doctors'));
 app.use('/api/appointments', require('./routes/appointments'));
 app.use('/api/checkin', require('./routes/checkin'));
 app.use('/api/vitals', require('./routes/vitals'));
+app.use('/api/consultation', require('./routes/consultation'));
+app.use('/api/prescription', require('./routes/prescription'));
+app.use('/api/visits', require('./routes/visits'));
+app.use('/api/emergency', require('./routes/emergency'));
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'CareOps API', timestamp: new Date().toISOString() });

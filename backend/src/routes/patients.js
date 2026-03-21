@@ -111,4 +111,21 @@ router.post('/lab-reports', verifyToken, upload.single('file'), async (req, res,
   }
 });
 
+// GET /api/patients/by-id?patientId=
+router.get('/by-id', verifyToken, async (req, res, next) => {
+  try {
+    const { patientId } = req.query;
+
+    if (!patientId) {
+      return res.status(400).json({ error: 'patientId query param is required' });
+    }
+
+    const doc = await db.collection('patients').doc(patientId).get();
+
+    res.json({ patient: doc.exists ? { id: doc.id, ...doc.data() } : null });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;
