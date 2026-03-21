@@ -156,14 +156,20 @@ export default function DoctorDashboard() {
     setPanelLoading(true);
 
     try {
-      const [visitRes, patientRes] = await Promise.all([
-        client.get(`/api/visits/by-appointment?appointmentId=${appt.id}`),
-        client.get(`/api/patients/by-id?patientId=${appt.patientId}`),
-      ]);
-
+      // Fetch visit — always required
+      const visitRes = await client.get(`/api/visits/by-appointment?appointmentId=${appt.id}`);
       const loadedVisit = visitRes.data.visit;
       setVisit(loadedVisit);
-      setPatient(patientRes.data.patient);
+
+      // Fetch patient only if patientId exists
+      if (appt.patientId) {
+        try {
+          const patientRes = await client.get(`/api/patients/by-id?patientId=${appt.patientId}`);
+          setPatient(patientRes.data.patient);
+        } catch {
+          setPatient(null);
+        }
+      }
 
       // Trigger decision panel generation
       client.post('/api/consultation/panel', { visitId: loadedVisit.id })
@@ -430,11 +436,13 @@ export default function DoctorDashboard() {
             <div className="flex-1 overflow-y-auto p-4">
               {!selectedAppt ? (
                 <p className="text-center text-gray-400 text-xs pt-6">Select a patient to view insights</p>
-              ) : panelLoading || decisionPanel.length === 0 ? (
+              ) : panelLoading ? (
                 <div className="flex flex-col items-center pt-8 gap-3">
                   <div className="w-5 h-5 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
                   <p className="text-xs text-gray-400">Generating insights…</p>
                 </div>
+              ) : decisionPanel.length === 0 ? (
+                <p className="text-center text-gray-400 text-xs pt-6">No insights available</p>
               ) : (
                 <ul className="space-y-3">
                   {decisionPanel.map((insight, i) => (
