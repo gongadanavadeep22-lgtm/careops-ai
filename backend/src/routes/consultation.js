@@ -42,9 +42,17 @@ router.post('/soap', verifyToken, async (req, res, next) => {
         plan: result.plan || '',
       },
       prescription: result.prescription || [],
+      healthTips: result.healthTips || [],
+      prescriptionValidation: result.prescriptionValidation || {},
     });
 
-    res.json({ success: true, soapNote: result, prescription: result.prescription || [] });
+    res.json({
+      success: true,
+      soapNote: result,
+      prescription: result.prescription || [],
+      healthTips: result.healthTips || [],
+      prescriptionValidation: result.prescriptionValidation || {},
+    });
   } catch (err) {
     next(err);
   }

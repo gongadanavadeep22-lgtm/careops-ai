@@ -62,6 +62,8 @@ export default function DoctorDashboard() {
   const [soapLoading, setSoapLoading] = useState(false);
   const [soapNote, setSoapNote] = useState(null);
   const [prescription, setPrescription] = useState([]);
+  const [healthTips, setHealthTips] = useState([]);
+  const [prescriptionValidation, setPrescriptionValidation] = useState(null);
   const [soapError, setSoapError] = useState('');
 
   // Confirm
@@ -148,6 +150,8 @@ export default function DoctorDashboard() {
     setPatient(null);
     setSoapNote(null);
     setPrescription([]);
+    setHealthTips([]);
+    setPrescriptionValidation(null);
     setSoapError('');
     setConfirmStatus('');
     setTranscript('');
@@ -210,6 +214,8 @@ export default function DoctorDashboard() {
       });
       setSoapNote(data.soapNote);
       setPrescription(data.prescription || []);
+      setHealthTips(data.healthTips || []);
+      setPrescriptionValidation(data.prescriptionValidation || null);
     } catch {
       setSoapError('Failed to generate SOAP note. Please try again.');
     } finally {
@@ -228,6 +234,8 @@ export default function DoctorDashboard() {
       setVisit(null);
       setPatient(null);
       setSoapNote(null);
+      setHealthTips([]);
+      setPrescriptionValidation(null);
     } catch {
       setConfirmStatus('Failed to confirm. Please try again.');
     } finally {
@@ -400,8 +408,9 @@ export default function DoctorDashboard() {
 
                   {/* SOAP Note */}
                   {soapNote && (
-                    <div className="border rounded-lg p-3 space-y-2">
+                    <div className="border rounded-lg p-3 space-y-3">
                       <h3 className="text-sm font-semibold text-gray-700">SOAP Note</h3>
+
                       {['subjective', 'objective', 'assessment', 'plan'].map((key) => (
                         <div key={key}>
                           <p className="text-xs font-semibold text-gray-500 uppercase">{key}</p>
@@ -409,6 +418,7 @@ export default function DoctorDashboard() {
                         </div>
                       ))}
 
+                      {/* Prescription */}
                       {prescription.length > 0 && (
                         <div>
                           <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Prescription</p>
@@ -422,12 +432,53 @@ export default function DoctorDashboard() {
                         </div>
                       )}
 
+                      {/* Prescription Validation */}
+                      {prescriptionValidation && (
+                        <div className={`rounded-lg px-3 py-2 text-sm font-medium flex items-start gap-2 ${
+                          prescriptionValidation.isCorrect
+                            ? 'bg-green-50 border border-green-300 text-green-700'
+                            : 'bg-red-50 border border-red-300 text-red-700'
+                        }`}>
+                          <span className="text-lg shrink-0">
+                            {prescriptionValidation.isCorrect ? '✅' : '⚠️'}
+                          </span>
+                          <div>
+                            <p className="font-semibold">
+                              {prescriptionValidation.isCorrect ? 'Prescription looks correct' : 'Wrong medicine detected'}
+                            </p>
+                            {prescriptionValidation.message && (
+                              <p className="text-xs mt-0.5 opacity-90">{prescriptionValidation.message}</p>
+                            )}
+                            {!prescriptionValidation.isCorrect && prescriptionValidation.suggestedMedicines?.length > 0 && (
+                              <p className="text-xs mt-1 font-semibold">
+                                Suggested: {prescriptionValidation.suggestedMedicines.join(', ')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Health Tips */}
+                      {healthTips.length > 0 && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
+                          <p className="text-xs font-semibold text-blue-600 uppercase mb-1">💡 Health Tips for Patient</p>
+                          <ul className="space-y-1">
+                            {healthTips.map((tip, i) => (
+                              <li key={i} className="text-sm text-blue-700 flex items-start gap-1">
+                                <span className="shrink-0">{i + 1}.</span> {tip}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+
+                      {/* Approve Button */}
                       <button
                         onClick={handleConfirm}
                         disabled={confirmLoading}
-                        className="w-full bg-green-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+                        className="w-full bg-green-600 text-white py-2.5 rounded-lg text-sm font-bold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed mt-1 flex items-center justify-center gap-2"
                       >
-                        {confirmLoading ? 'Sending…' : 'Confirm and Send to Pharmacy'}
+                        {confirmLoading ? 'Sending…' : '✅ Approve & Send to Pharmacy'}
                       </button>
 
                       {confirmStatus && (

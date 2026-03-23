@@ -38,20 +38,35 @@ async function generateSOAPNote({ transcript, patientName, age, conditions, alle
     ? `BP: ${vitals.bp || 'N/A'}, Temp: ${vitals.temperature || 'N/A'}°F, SpO2: ${vitals.spo2 || 'N/A'}%`
     : 'N/A';
 
-  const prompt = `You are a clinical documentation assistant. Convert this doctor consultation transcript into a structured SOAP note.
+  const prompt = `You are a clinical documentation assistant.
 Patient: ${patientName}, Age: ${age}, Conditions: ${conditions}, Allergies: ${allergies}, Vitals: ${vitalsStr}
-Transcript: ${transcript}
+Doctor consultation transcript: ${transcript}
+
+Do all of the following:
+1. Convert the transcript into a SOAP note.
+2. Generate exactly 2 health tips to improve the patient's recovery beyond the prescription.
+3. Validate each prescribed medicine against the patient's symptoms and diagnosis. If any medicine is wrong or inappropriate, flag it with a suggested correct medicine.
+
 Respond with valid JSON only. No markdown. No explanation.
-Format: {"subjective":"string","objective":"string","assessment":"string","plan":"string","prescription":["medicine string"]}`;
+Format: {"subjective":"string","objective":"string","assessment":"string","plan":"string","prescription":["medicine name"],"healthTips":["tip 1","tip 2"],"prescriptionValidation":{"isCorrect":true,"status":"correct","message":"string","suggestedMedicines":[]}}`;
 
   try {
     const result = await model.generateContent(prompt);
     const text = result.response.text();
     const cleaned = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    return JSON.parse(cleaned);
+    const parsed = JSON.parse(cleaned);
+    return {
+      subjective: parsed.subjective || '',
+      objective: parsed.objective || '',
+      assessment: parsed.assessment || '',
+      plan: parsed.plan || '',
+      prescription: parsed.prescription || [],
+      healthTips: parsed.healthTips || [],
+      prescriptionValidation: parsed.prescriptionValidation || { isCorrect: true, status: 'correct', message: '', suggestedMedicines: [] },
+    };
   } catch (error) {
     console.error('Gemini SOAP error:', error.message);
-    return { subjective: '', objective: '', assessment: '', plan: '', prescription: [] };
+    return { subjective: '', objective: '', assessment: '', plan: '', prescription: [], healthTips: [], prescriptionValidation: { isCorrect: true, status: 'correct', message: '', suggestedMedicines: [] } };
   }
 }
 

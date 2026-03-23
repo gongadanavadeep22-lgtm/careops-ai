@@ -78,16 +78,27 @@ router.post('/ready', verifyToken, async (req, res, next) => {
       dispensedAt: new Date(),
     });
 
-    // Step 4: Calculate total amount
+    // Step 4: Fixed total amount ₹1000
     const medicines = visit.prescription || [];
-    const totalAmount = medicines.length * 150;
+    const totalAmount = 1000;
 
-    // Step 5 & 6: Build and send WhatsApp message
+    // Step 5 & 6: Build and send WhatsApp message with SOAP notes
     let whatsappWarning = null;
     if (patientPhone) {
       const medicineList = medicines.map((m) => `✅ ${m}`).join('\n');
       const frontendUrl = (process.env.ALLOWED_ORIGIN || 'https://careops-ai-gamma.vercel.app').trim().replace(/['"]/g, '');
-      const message = `Hello ${visit.patientName}!\nYour medicines are ready for pickup.\n\nPrescription:\n${medicineList}\n\nTotal Amount: Rs ${totalAmount}\n\nPay here: ${frontendUrl}/payment-success\n\nPlease collect from Counter 2.\nThank you for choosing CareOps AI.`;
+
+      const soapNote = visit.soapNote || {};
+      const soapSection = soapNote.subjective
+        ? `\n📋 *Consultation Notes:*\nSymptoms: ${soapNote.subjective}\nDiagnosis: ${soapNote.assessment}\nPlan: ${soapNote.plan}`
+        : '';
+
+      const healthTips = visit.healthTips || [];
+      const tipsSection = healthTips.length
+        ? `\n\n💡 *Health Tips:*\n${healthTips.map((t) => `• ${t}`).join('\n')}`
+        : '';
+
+      const message = `Hello ${visit.patientName}!\nYour medicines are ready and packed. 🎉\n\n💊 *Prescription:*\n${medicineList}\n\n💰 *Total Amount: Rs ${totalAmount}*\n\n💳 Pay here: ${frontendUrl}/payment-success${soapSection}${tipsSection}\n\n📍 Please collect from Counter 2.\nThank you for choosing CareOps AI.`;
 
       try {
         await sendWhatsApp(patientPhone, message);

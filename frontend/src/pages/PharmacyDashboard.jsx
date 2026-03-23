@@ -21,10 +21,13 @@ export default function PharmacyDashboard() {
   const [activeLoading, setActiveLoading] = useState(true);
   const [completedLoading, setCompletedLoading] = useState(true);
 
-  // Per-card state
-  const [readyLoading, setReadyLoading] = useState({});
-  const [readyStatus, setReadyStatus] = useState({});
-  const [readyError, setReadyError] = useState({});
+  // Detail view state
+  const [selectedVisit, setSelectedVisit] = useState(null);
+  const [patientPhone, setPatientPhone] = useState('');
+  const [phoneLoading, setPhoneLoading] = useState(false);
+  const [readyLoading, setReadyLoading] = useState(false);
+  const [readyStatus, setReadyStatus] = useState('');
+  const [readyError, setReadyError] = useState('');
 
   // ── ACTIVE PRESCRIPTIONS (confirmed) via onSnapshot ──
   useEffect(() => {
@@ -72,24 +75,41 @@ export default function PharmacyDashboard() {
     return () => unsubscribe();
   }, []);
 
-  async function handleMarkReady(visit) {
-    setReadyLoading((p) => ({ ...p, [visit.id]: true }));
-    setReadyStatus((p) => ({ ...p, [visit.id]: '' }));
-    setReadyError((p) => ({ ...p, [visit.id]: '' }));
+  async function handleSelectVisit(visit) {
+    setSelectedVisit(visit);
+    setPatientPhone('');
+    setReadyStatus('');
+    setReadyError('');
+    setPhoneLoading(true);
+
+    if (visit.patientId) {
+      try {
+        const { data } = await client.get(`/api/patients/by-id?patientId=${visit.patientId}`);
+        setPatientPhone(data.patient?.phone || '');
+      } catch {
+        setPatientPhone('');
+      }
+    }
+    setPhoneLoading(false);
+  }
+
+  async function handleMarkReady() {
+    if (!selectedVisit) return;
+    setReadyLoading(true);
+    setReadyStatus('');
+    setReadyError('');
 
     try {
-      const { data } = await client.post('/api/pharmacy/ready', { visitId: visit.id });
+      const { data } = await client.post('/api/pharmacy/ready', { visitId: selectedVisit.id });
       const msg = data.warning
         ? `Medicines marked as ready. ${data.warning}`
         : 'Medicines marked as ready. WhatsApp sent to patient.';
-      setReadyStatus((p) => ({ ...p, [visit.id]: msg }));
+      setReadyStatus(msg);
+      setTimeout(() => setSelectedVisit(null), 3000);
     } catch (err) {
-      setReadyError((p) => ({
-        ...p,
-        [visit.id]: err.response?.data?.error || 'Failed to mark as ready. Please try again.',
-      }));
+      setReadyError(err.response?.data?.error || 'Failed to mark as ready. Please try again.');
     } finally {
-      setReadyLoading((p) => ({ ...p, [visit.id]: false }));
+      setReadyLoading(false);
     }
   }
 
@@ -124,51 +144,96 @@ export default function PharmacyDashboard() {
           ) : (
             <div className="space-y-4">
               {active.map((visit) => (
-                <div key={visit.id} className="bg-white rounded-xl shadow-sm p-5 border-l-4 border-blue-500">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="flex-1 space-y-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold text-gray-800">{visit.patientName}</h3>
-                        <span className="text-xs text-gray-400">
-                          Confirmed {timeAgo(visit.createdAt)}
-                        </span>
+                <div key={visit.id}>
+                  {/* Prescription Card — click to open detail */}
+                  <button
+                    onClick={() => handleSelectVisit(visit)}
+                    className={`w-full text-left bg-white rounded-xl shadow-sm p-5 border-l-4 border-blue-500 hover:shadow-md transition ${selectedVisit?.id === visit.id ? 'ring-2 ring-blue-400' : ''}`}
+                  >
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="font-semibold text-gray-800">{visit.patientName}</h3>
+                          <span className="text-xs text-gray-400">Confirmed {timeAgo(visit.createdAt)}</span>
+                          <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">
+                            {visit.prescription?.length || 0} medicines
+                          </span>
+                        </div>
+                        <p className="text-xs text-gray-500">Click to view details and send WhatsApp</p>
+                      </div>
+                      <span className="text-blue-500 text-sm font-medium shrink-0">View →</span>
+                    </div>
+                  </button>
+
+                  {/* Detail Panel — shown when this card is selected */}
+                  {selectedVisit?.id === visit.id && (
+                    <div className="bg-white rounded-xl shadow-sm p-6 mt-2 border border-blue-200 space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-base font-bold text-gray-800">Prescription Details</h3>
+                        <button onClick={() => setSelectedVisit(null)} className="text-gray-400 hover:text-gray-600 text-sm">✕ Close</button>
                       </div>
 
-                      {visit.prescription && visit.prescription.length > 0 ? (
-                        <ul className="space-y-1">
-                          {visit.prescription.map((med, i) => (
-                            <li key={i} className="text-sm text-gray-700 flex items-start gap-1.5">
-                              <span className="text-blue-500 mt-0.5">•</span> {med}
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-sm text-gray-400">No medicines listed</p>
+                      {/* Patient Info */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-500 font-medium uppercase">Patient Name</p>
+                          <p className="text-sm font-bold text-gray-800 mt-1">{visit.patientName}</p>
+                        </div>
+                        <div className="bg-gray-50 rounded-lg p-3">
+                          <p className="text-xs text-gray-500 font-medium uppercase">Phone Number</p>
+                          {phoneLoading ? (
+                            <p className="text-sm text-gray-400 mt-1">Loading…</p>
+                          ) : (
+                            <p className="text-sm font-bold text-gray-800 mt-1">{patientPhone || 'Not available'}</p>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Medicines */}
+                      <div>
+                        <p className="text-xs text-gray-500 font-medium uppercase mb-2">Prescribed Medicines</p>
+                        {visit.prescription && visit.prescription.length > 0 ? (
+                          <ul className="space-y-2">
+                            {visit.prescription.map((med, i) => (
+                              <li key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-2">
+                                <span className="text-blue-500 font-bold">{i + 1}.</span>
+                                <span className="text-sm text-gray-800 font-medium">{med}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-sm text-gray-400">No medicines listed</p>
+                        )}
+                      </div>
+
+                      {/* Total Amount */}
+                      <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex items-center justify-between">
+                        <span className="text-sm font-semibold text-gray-700">Total Amount</span>
+                        <span className="text-xl font-bold text-green-700">₹1000</span>
+                      </div>
+
+                      {/* Submit Button */}
+                      {!readyStatus && (
+                        <button
+                          onClick={handleMarkReady}
+                          disabled={readyLoading}
+                          className="w-full bg-green-600 text-white py-3 rounded-xl text-sm font-bold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                        >
+                          {readyLoading ? 'Sending…' : '📤 Submit & Send WhatsApp to Patient'}
+                        </button>
                       )}
 
-                      <p className="text-xs text-gray-500 font-medium">
-                        Total: ₹{(visit.prescription?.length || 0) * 150}
-                      </p>
+                      {readyStatus && (
+                        <p className="text-sm text-green-600 bg-green-50 border border-green-200 rounded px-3 py-2 text-center font-medium">
+                          ✅ {readyStatus}
+                        </p>
+                      )}
+                      {readyError && (
+                        <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                          {readyError}
+                        </p>
+                      )}
                     </div>
-
-                    <button
-                      onClick={() => handleMarkReady(visit)}
-                      disabled={readyLoading[visit.id] || !!readyStatus[visit.id]}
-                      className="shrink-0 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      {readyLoading[visit.id] ? 'Marking…' : readyStatus[visit.id] ? '✓ Done' : 'Mark as Ready'}
-                    </button>
-                  </div>
-
-                  {readyStatus[visit.id] && (
-                    <p className="text-sm text-green-600 bg-green-50 border border-green-200 rounded px-3 py-2 mt-3">
-                      {readyStatus[visit.id]}
-                    </p>
-                  )}
-                  {readyError[visit.id] && (
-                    <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2 mt-3">
-                      {readyError[visit.id]}
-                    </p>
                   )}
                 </div>
               ))}
