@@ -190,7 +190,13 @@ Format: {"subjective":"string","objective":"string","assessment":"string","plan"
     plan: '',
     prescription: [],
     healthTips: [],
-    prescriptionValidation: { isCorrect: true, status: 'correct', message: '', suggestedMedicines: [] },
+    prescriptionValidation: {
+      isCorrect: false,
+      status: 'wrong',
+      message:
+        'AI did not return a usable SOAP note. Check GEMINI_API_KEY on Railway, model access, and server logs for [Gemini] errors.',
+      suggestedMedicines: [],
+    },
   };
 
   try {
@@ -202,19 +208,35 @@ Format: {"subjective":"string","objective":"string","assessment":"string","plan"
     const prescription = normalizePrescription(parsed.prescription);
     const tips = Array.isArray(parsed.healthTips) ? parsed.healthTips.map(String).filter(Boolean).slice(0, 5) : [];
     const pv = parsed.prescriptionValidation || {};
+    const subjective = String(parsed.subjective || '').trim();
+    const objective = String(parsed.objective || '').trim();
+    const assessment = String(parsed.assessment || '').trim();
+    const plan = String(parsed.plan || '').trim();
+    const hasAnySoap = subjective || objective || assessment || plan;
+    const hasRx = prescription.length > 0;
+    let prescriptionValidation = {
+      isCorrect: pv.isCorrect !== false,
+      status: pv.status || 'correct',
+      message: String(pv.message || ''),
+      suggestedMedicines: Array.isArray(pv.suggestedMedicines) ? pv.suggestedMedicines.map(String) : [],
+    };
+    if (!hasAnySoap && !hasRx) {
+      prescriptionValidation = {
+        isCorrect: false,
+        status: 'wrong',
+        message:
+          'AI returned empty SOAP and no medicines. Check GEMINI_API_KEY, Railway logs, and try Generate SOAP again.',
+        suggestedMedicines: [],
+      };
+    }
     return {
-      subjective: String(parsed.subjective || '').trim(),
-      objective: String(parsed.objective || '').trim(),
-      assessment: String(parsed.assessment || '').trim(),
-      plan: String(parsed.plan || '').trim(),
+      subjective,
+      objective,
+      assessment,
+      plan,
       prescription,
       healthTips: tips.length >= 2 ? tips.slice(0, 2) : tips,
-      prescriptionValidation: {
-        isCorrect: pv.isCorrect !== false,
-        status: pv.status || 'correct',
-        message: String(pv.message || ''),
-        suggestedMedicines: Array.isArray(pv.suggestedMedicines) ? pv.suggestedMedicines.map(String) : [],
-      },
+      prescriptionValidation,
     };
   } catch (error) {
     console.error('Gemini SOAP error:', error.message);

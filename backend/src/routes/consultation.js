@@ -3,6 +3,7 @@ const router = express.Router();
 const verifyToken = require('../middleware/verifyToken');
 const { db } = require('../services/firestore');
 const { generateSOAPNote, generateDecisionPanel } = require('../services/gemini');
+const { debugSessionLog } = require('../utils/debugSessionLog');
 
 // POST /api/consultation/soap
 router.post('/soap', verifyToken, async (req, res, next) => {
@@ -34,18 +35,32 @@ router.post('/soap', verifyToken, async (req, res, next) => {
       vitals: visit.vitals || {},
     });
 
+    const hasAnySoap = [result.subjective, result.objective, result.assessment, result.plan].some((s) =>
+      String(s || '').trim()
+    );
+    const hasRx = (result.prescription || []).length > 0;
+
     const pv = result.prescriptionValidation || {};
     const statusStr = typeof pv.status === 'string' ? pv.status : '';
     const wrongStatus =
       pv.isCorrect === false ||
       pv.status === false ||
       /\b(wrong|incorrect|inappropriate|unsafe|invalid)\b/i.test(statusStr);
-    const prescriptionValidation = {
+    let prescriptionValidation = {
       isCorrect: !wrongStatus && pv.isCorrect !== false,
       status: wrongStatus ? 'wrong' : 'correct',
       message: pv.message || '',
       suggestedMedicines: Array.isArray(pv.suggestedMedicines) ? pv.suggestedMedicines : [],
     };
+    if (!hasAnySoap && !hasRx) {
+      prescriptionValidation = {
+        isCorrect: false,
+        status: 'wrong',
+        message:
+          'No SOAP or medicines saved. Fix Gemini on Railway (GEMINI_API_KEY, logs), then Generate SOAP again.',
+        suggestedMedicines: [],
+      };
+    }
 
     await db.collection('visits').doc(visitId).update({
       soapNote: {
@@ -59,6 +74,19 @@ router.post('/soap', verifyToken, async (req, res, next) => {
       prescriptionValidation,
     });
 
+    // #region agent log
+    debugSessionLog({
+      hypothesisId: 'H4',
+      location: 'consultation.js:soap:response',
+      message: 'SOAP generated',
+      data: {
+        visitIdLen: String(visitId).length,
+        rxCount: (result.prescription || []).length,
+        subjLen: String(result.subjective || '').length,
+        validationOk: prescriptionValidation.isCorrect,
+      },
+    });
+    // #endregion
     res.json({
       success: true,
       soapNote: result,
@@ -67,6 +95,14 @@ router.post('/soap', verifyToken, async (req, res, next) => {
       prescriptionValidation,
     });
   } catch (err) {
+    // #region agent log
+    debugSessionLog({
+      hypothesisId: 'H4',
+      location: 'consultation.js:soap:catch',
+      message: String(err.message || err),
+      data: { visitIdLen: String(req.body?.visitId || '').length },
+    });
+    // #endregion
     next(err);
   }
 });
@@ -128,8 +164,28 @@ router.post('/panel', verifyToken, async (req, res, next) => {
 
     await db.collection('visits').doc(visitId).update({ decisionPanel: insights });
 
+    // #region agent log
+    debugSessionLog({
+      hypothesisId: 'H4',
+      location: 'consultation.js:panel:response',
+      message: 'panel insights ready',
+      data: {
+        insightsCount: insights.length,
+        firstLen: insights[0] ? String(insights[0]).length : 0,
+        hasTranscript: Boolean(consultationTranscript && consultationTranscript.length),
+      },
+    });
+    // #endregion
     res.json({ success: true, insights });
   } catch (err) {
+    // #region agent log
+    debugSessionLog({
+      hypothesisId: 'H4',
+      location: 'consultation.js:panel:catch',
+      message: String(err.message || err),
+      data: {},
+    });
+    // #endregion
     next(err);
   }
 });

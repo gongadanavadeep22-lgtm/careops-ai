@@ -14,6 +14,19 @@ async function verifyToken(req, res, next) {
     req.user = decoded;
     next();
   } catch (err) {
+    // #region agent log
+    try {
+      const { debugSessionLog } = require('../utils/debugSessionLog');
+      debugSessionLog({
+        hypothesisId: 'H2',
+        location: 'verifyToken.js:catch',
+        message: 'verifyIdToken failed',
+        data: { path: req.path, method: req.method },
+      });
+    } catch (_) {
+      /* ignore */
+    }
+    // #endregion
     return res.status(401).json({ error: 'Invalid or expired token' });
   }
 }

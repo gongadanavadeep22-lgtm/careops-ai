@@ -222,6 +222,24 @@ export default function DoctorDashboard() {
     const reqId = ++panelRequestRef.current;
     setPanelLoading(true);
     setPanelError('');
+    // #region agent log
+    fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
+      body: JSON.stringify({
+        sessionId: '74527c',
+        hypothesisId: 'H1',
+        location: 'DoctorDashboard.jsx:triggerPanel:start',
+        message: 'panel request start',
+        data: {
+          hasBaseUrl: Boolean(import.meta.env.VITE_API_URL),
+          visitIdLen: String(visitId || '').length,
+          transcriptLen: consultationTranscript?.trim?.()?.length ?? 0,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     try {
       const { data } = await client.post('/api/consultation/panel', {
         visitId,
@@ -229,9 +247,41 @@ export default function DoctorDashboard() {
       });
       if (reqId !== panelRequestRef.current) return;
       setDecisionPanel(Array.isArray(data.insights) ? data.insights : []);
+      // #region agent log
+      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
+        body: JSON.stringify({
+          sessionId: '74527c',
+          hypothesisId: 'H4',
+          location: 'DoctorDashboard.jsx:triggerPanel:ok',
+          message: 'panel ok',
+          data: { insightsCount: Array.isArray(data.insights) ? data.insights.length : -1 },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     } catch (err) {
       if (reqId !== panelRequestRef.current) return;
       setPanelError(err.response?.data?.error || 'Failed to generate insights. Click Retry.');
+      // #region agent log
+      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
+        body: JSON.stringify({
+          sessionId: '74527c',
+          hypothesisId: 'H1',
+          location: 'DoctorDashboard.jsx:triggerPanel:err',
+          message: 'panel failed',
+          data: {
+            status: err.response?.status ?? null,
+            hasResponse: Boolean(err.response),
+            errSnippet: String(err.response?.data?.error || err.message || '').slice(0, 80),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     } finally {
       if (reqId === panelRequestRef.current) setPanelLoading(false);
     }
@@ -252,8 +302,42 @@ export default function DoctorDashboard() {
       setPrescription(data.prescription || []);
       setHealthTips(data.healthTips || []);
       setPrescriptionValidation(data.prescriptionValidation || null);
+      // #region agent log
+      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
+        body: JSON.stringify({
+          sessionId: '74527c',
+          hypothesisId: 'H4',
+          location: 'DoctorDashboard.jsx:soap:ok',
+          message: 'soap client ok',
+          data: {
+            rxCount: (data.prescription || []).length,
+            subjLen: String(data.soapNote?.subjective || '').length,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       await triggerPanel(visit.id, transcript.trim());
-    } catch {
+    } catch (err) {
+      // #region agent log
+      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
+        body: JSON.stringify({
+          sessionId: '74527c',
+          hypothesisId: 'H1',
+          location: 'DoctorDashboard.jsx:soap:err',
+          message: 'soap client fail',
+          data: {
+            status: err.response?.status ?? null,
+            hasResponse: Boolean(err.response),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       setSoapError('Failed to generate SOAP note. Please try again.');
     } finally {
       setSoapLoading(false);
@@ -263,7 +347,33 @@ export default function DoctorDashboard() {
   // ── CONFIRM PRESCRIPTION ──
   async function handleConfirm() {
     if (!visit?.id) return;
+    // Server uses Firestore, not only screen state — must match saved SOAP / prescription
+    if (!canApprove) {
+      // #region agent log
+      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
+        body: JSON.stringify({
+          sessionId: '74527c',
+          hypothesisId: 'H3',
+          location: 'DoctorDashboard.jsx:handleConfirm:blocked',
+          message: 'confirm blocked by canApprove',
+          data: {
+            soapReady,
+            medListLen: medList.length,
+            validationOk: prescriptionValidation?.isCorrect === true,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      setConfirmStatus(
+        'Complete Generate SOAP Note with medicines (or plan text) and a passing AI check before sending.'
+      );
+      return;
+    }
     setConfirmLoading(true);
+    setConfirmStatus('');
     try {
       await client.post('/api/prescription/confirm', { visitId: visit.id });
       setConfirmStatus('Prescription sent to pharmacy successfully.');
@@ -273,10 +383,53 @@ export default function DoctorDashboard() {
       setSoapNote(null);
       setHealthTips([]);
       setPrescriptionValidation(null);
+      // #region agent log
+      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
+        body: JSON.stringify({
+          sessionId: '74527c',
+          hypothesisId: 'H5',
+          location: 'DoctorDashboard.jsx:handleConfirm:ok',
+          message: 'confirm client ok',
+          data: {},
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     } catch (err) {
-      setConfirmStatus(
-        err.response?.data?.error || 'Failed to confirm. Please try again.'
-      );
+      const status = err.response?.status;
+      const bodyErr = err.response?.data?.error || err.response?.data?.message;
+      let msg =
+        bodyErr ||
+        (status === 401
+          ? 'Session expired — sign out and sign in again.'
+          : null) ||
+        (!err.response
+          ? 'Cannot reach API. Set VITE_API_URL to your Railway URL (Vercel) or run the backend locally.'
+          : null) ||
+        err.message ||
+        'Failed to confirm. Please try again.';
+      if (status) msg = `${msg} (HTTP ${status})`;
+      setConfirmStatus(msg);
+      // #region agent log
+      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
+        body: JSON.stringify({
+          sessionId: '74527c',
+          hypothesisId: 'H1',
+          location: 'DoctorDashboard.jsx:handleConfirm:err',
+          message: 'confirm client fail',
+          data: {
+            status: err.response?.status ?? null,
+            hasResponse: Boolean(err.response),
+            errSnippet: String(bodyErr || err.message || '').slice(0, 100),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
     } finally {
       setConfirmLoading(false);
     }
@@ -531,12 +684,26 @@ export default function DoctorDashboard() {
                         </p>
                       )}
                       <button
+                        type="button"
                         onClick={handleConfirm}
                         disabled={confirmLoading || !canApprove}
-                        className="w-full bg-green-600 text-white py-2.5 rounded-lg text-sm font-bold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed mt-1 flex items-center justify-center gap-2"
+                        className={`w-full py-2.5 rounded-lg text-sm font-bold transition mt-1 flex items-center justify-center gap-2 ${
+                          canApprove && !confirmLoading
+                            ? 'bg-green-600 text-white hover:bg-green-700 shadow-sm'
+                            : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                        }`}
                       >
-                        {confirmLoading ? 'Sending…' : '✅ Approve & Send to Pharmacy'}
+                        {confirmLoading
+                          ? 'Sending…'
+                          : canApprove
+                            ? '✅ Approve & Send to Pharmacy'
+                            : '🔒 Approve & Send to Pharmacy — locked'}
                       </button>
+                      {!canApprove && !confirmLoading && (
+                        <p className="text-[11px] text-gray-500 text-center mt-1">
+                          There is no separate Confirm button. This turns <strong>green</strong> after SOAP is filled, medicines are listed, and the AI check passes.
+                        </p>
+                      )}
 
                       {confirmStatus && (
                         <p className={`text-xs text-center ${confirmStatus.includes('successfully') ? 'text-green-600' : 'text-red-600'}`}>
