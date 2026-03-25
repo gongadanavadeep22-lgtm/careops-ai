@@ -4,7 +4,7 @@
   "description": "CareOps AI — Express + Firebase Admin backend",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js",
+    "start": "node --disable-warning=DEP0040 index.js",
     "dev": "nodemon index.js"
   },
   "engines": {

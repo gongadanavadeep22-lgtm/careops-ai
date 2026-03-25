@@ -1,0 +1,3 @@
+# Use modern omit flag (avoids npm WARN: config production — use --omit=dev instead)
+[phases.install]
+cmds = ["npm ci --omit=dev"]
