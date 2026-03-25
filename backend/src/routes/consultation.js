@@ -34,6 +34,19 @@ router.post('/soap', verifyToken, async (req, res, next) => {
       vitals: visit.vitals || {},
     });
 
+    const pv = result.prescriptionValidation || {};
+    const statusStr = typeof pv.status === 'string' ? pv.status : '';
+    const wrongStatus =
+      pv.isCorrect === false ||
+      pv.status === false ||
+      /\b(wrong|incorrect|inappropriate|unsafe|invalid)\b/i.test(statusStr);
+    const prescriptionValidation = {
+      isCorrect: !wrongStatus && pv.isCorrect !== false,
+      status: wrongStatus ? 'wrong' : 'correct',
+      message: pv.message || '',
+      suggestedMedicines: Array.isArray(pv.suggestedMedicines) ? pv.suggestedMedicines : [],
+    };
+
     await db.collection('visits').doc(visitId).update({
       soapNote: {
         subjective: result.subjective || '',
@@ -43,7 +56,7 @@ router.post('/soap', verifyToken, async (req, res, next) => {
       },
       prescription: result.prescription || [],
       healthTips: result.healthTips || [],
-      prescriptionValidation: result.prescriptionValidation || {},
+      prescriptionValidation,
     });
 
     res.json({
@@ -51,17 +64,17 @@ router.post('/soap', verifyToken, async (req, res, next) => {
       soapNote: result,
       prescription: result.prescription || [],
       healthTips: result.healthTips || [],
-      prescriptionValidation: result.prescriptionValidation || {},
+      prescriptionValidation,
     });
   } catch (err) {
     next(err);
   }
 });
 
-// POST /api/consultation/panel
+// POST /api/consultation/panel  (optional body.transcript = consultation text for richer insights)
 router.post('/panel', verifyToken, async (req, res, next) => {
   try {
-    const { visitId } = req.body;
+    const { visitId, transcript: consultationTranscript } = req.body;
 
     if (!visitId) {
       return res.status(400).json({ error: 'visitId is required' });
@@ -79,25 +92,39 @@ router.post('/panel', verifyToken, async (req, res, next) => {
       if (patientSnap.exists) patient = patientSnap.data();
     }
 
-    const pastSnap = await db
-      .collection('visits')
-      .where('patientId', '==', visit.patientId || '')
-      .get();
+    let pastVisits = [];
+    if (visit.patientId) {
+      const pastSnap = await db
+        .collection('visits')
+        .where('patientId', '==', visit.patientId)
+        .get();
+      pastVisits = pastSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((v) => v.id !== visitId)
+        .sort((a, b) => {
+          const ta = a.createdAt?.toMillis?.() ?? a.createdAt?.seconds * 1000 ?? 0;
+          const tb = b.createdAt?.toMillis?.() ?? b.createdAt?.seconds * 1000 ?? 0;
+          return tb - ta;
+        })
+        .slice(0, 3);
+    }
 
-    const pastVisits = pastSnap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((v) => v.id !== visitId)
-      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-      .slice(0, 3);
-
-    const insights = await generateDecisionPanel({
+    let insights = await generateDecisionPanel({
       symptoms: visit.symptoms || '',
       age: patient.age || '',
       conditions: patient.conditions || '',
       allergies: patient.allergies || '',
       vitals: visit.vitals || {},
       pastVisits,
+      consultationTranscript: typeof consultationTranscript === 'string' ? consultationTranscript.trim() : '',
     });
+    if (!Array.isArray(insights) || insights.length === 0) {
+      insights = [
+        'Review patient history carefully',
+        'Check current vitals',
+        'Consider allergies before prescribing',
+      ];
+    }
 
     await db.collection('visits').doc(visitId).update({ decisionPanel: insights });
 

@@ -5,6 +5,18 @@ import client from '../api/client';
 import Navbar from '../components/Navbar';
 import LoadingSpinner from '../components/LoadingSpinner';
 
+function medicinesForVisit(visit) {
+  const rx = visit?.prescription;
+  if (Array.isArray(rx) && rx.length > 0) {
+    return rx.map((m) => (typeof m === 'string' ? m : m?.name || String(m))).filter(Boolean);
+  }
+  const plan = visit?.soapNote?.plan;
+  if (plan && String(plan).trim()) {
+    return [String(plan).trim()];
+  }
+  return [];
+}
+
 function timeAgo(dateStr) {
   if (!dateStr) return '';
   const d = dateStr?.toDate ? dateStr.toDate() : new Date(dateStr);
@@ -156,7 +168,7 @@ export default function PharmacyDashboard() {
                           <h3 className="font-semibold text-gray-800">{visit.patientName}</h3>
                           <span className="text-xs text-gray-400">Confirmed {timeAgo(visit.createdAt)}</span>
                           <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">
-                            {visit.prescription?.length || 0} medicines
+                            {medicinesForVisit(visit).length} medicines
                           </span>
                         </div>
                         <p className="text-xs text-gray-500">Click to view details and send WhatsApp</p>
@@ -192,9 +204,9 @@ export default function PharmacyDashboard() {
                       {/* Medicines */}
                       <div>
                         <p className="text-xs text-gray-500 font-medium uppercase mb-2">Prescribed Medicines</p>
-                        {visit.prescription && visit.prescription.length > 0 ? (
+                        {medicinesForVisit(visit).length > 0 ? (
                           <ul className="space-y-2">
-                            {visit.prescription.map((med, i) => (
+                            {medicinesForVisit(visit).map((med, i) => (
                               <li key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-2">
                                 <span className="text-blue-500 font-bold">{i + 1}.</span>
                                 <span className="text-sm text-gray-800 font-medium">{med}</span>
@@ -276,9 +288,9 @@ export default function PharmacyDashboard() {
                           Dispensed
                         </span>
                       </div>
-                      {visit.prescription && visit.prescription.length > 0 && (
+                      {medicinesForVisit(visit).length > 0 && (
                         <ul className="space-y-0.5">
-                          {visit.prescription.map((med, i) => (
+                          {medicinesForVisit(visit).map((med, i) => (
                             <li key={i} className="text-xs text-gray-500 flex items-start gap-1">
                               <span className="text-gray-400">•</span> {med}
                             </li>
@@ -286,9 +298,7 @@ export default function PharmacyDashboard() {
                         </ul>
                       )}
                     </div>
-                    <span className="text-sm text-gray-400 font-medium shrink-0">
-                      ₹{(visit.prescription?.length || 0) * 150}
-                    </span>
+                    <span className="text-sm text-gray-400 font-medium shrink-0">₹1000</span>
                   </div>
                 </div>
               ))}

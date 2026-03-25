@@ -3,6 +3,7 @@ const router = express.Router();
 const verifyToken = require('../middleware/verifyToken');
 const { db } = require('../services/firestore');
 const { sendWhatsApp } = require('../services/twilio');
+const { medicinesForVisit } = require('../utils/visitMedicines');
 
 // GET /api/pharmacy/queue
 router.get('/queue', verifyToken, async (req, res, next) => {
@@ -78,8 +79,8 @@ router.post('/ready', verifyToken, async (req, res, next) => {
       dispensedAt: new Date(),
     });
 
-    // Step 4: Fixed total amount ₹1000
-    const medicines = visit.prescription || [];
+    // Step 4: Fixed total amount ₹1000 (use SOAP plan if prescription array empty)
+    const medicines = medicinesForVisit(visit);
     const totalAmount = 1000;
 
     // Step 5 & 6: Build and send WhatsApp message with SOAP notes
@@ -89,9 +90,14 @@ router.post('/ready', verifyToken, async (req, res, next) => {
       const frontendUrl = (process.env.ALLOWED_ORIGIN || 'https://careops-ai-gamma.vercel.app').trim().replace(/['"]/g, '');
 
       const soapNote = visit.soapNote || {};
-      const soapSection = soapNote.subjective
-        ? `\n📋 *Consultation Notes:*\nSymptoms: ${soapNote.subjective}\nDiagnosis: ${soapNote.assessment}\nPlan: ${soapNote.plan}`
-        : '';
+      const soapSection =
+        soapNote.subjective || soapNote.objective || soapNote.assessment || soapNote.plan
+          ? `\n📋 *Consultation Summary (SOAP):*\n` +
+            `S: ${soapNote.subjective || '—'}\n` +
+            `O: ${soapNote.objective || '—'}\n` +
+            `A: ${soapNote.assessment || '—'}\n` +
+            `P: ${soapNote.plan || '—'}`
+          : '';
 
       const healthTips = visit.healthTips || [];
       const tipsSection = healthTips.length
@@ -103,8 +109,13 @@ router.post('/ready', verifyToken, async (req, res, next) => {
       try {
         await sendWhatsApp(patientPhone, message);
       } catch (whatsappErr) {
-        console.error('WhatsApp send failed:', whatsappErr.message);
-        whatsappWarning = 'Prescription marked as ready but WhatsApp could not be sent.';
+        console.error(
+          'WhatsApp send failed:',
+          whatsappErr.message,
+          whatsappErr.code || whatsappErr.status || ''
+        );
+        whatsappWarning =
+          'Prescription marked as ready but WhatsApp could not be sent. Check Railway logs and Twilio sandbox / FROM number.';
       }
     } else {
       whatsappWarning = 'Prescription marked as ready. No phone number found for patient.';

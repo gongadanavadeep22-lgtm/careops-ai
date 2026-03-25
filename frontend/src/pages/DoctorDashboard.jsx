@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { collection, query, where, onSnapshot, doc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import client from '../api/client';
 import Navbar from '../components/Navbar';
@@ -7,6 +7,21 @@ import Navbar from '../components/Navbar';
 import EmergencyBanner from '../components/EmergencyBanner';
 
 const URGENCY_ORDER = { EMERGENCY: 0, PRIORITY: 1, GENERAL: 2 };
+
+function hasSoapContent(sn) {
+  if (!sn || typeof sn !== 'object') return false;
+  return ['subjective', 'objective', 'assessment', 'plan'].some(
+    (k) => String(sn[k] ?? '').trim().length > 0
+  );
+}
+
+/** Match backend medicinesForVisit: list for approve / UI */
+function medicinesFromState(soapNote, prescription) {
+  if (Array.isArray(prescription) && prescription.length > 0) return prescription;
+  const plan = soapNote?.plan;
+  if (plan && String(plan).trim()) return [String(plan).trim()];
+  return [];
+}
 
 function urgencyBorderColor(urgency) {
   if (urgency === 'EMERGENCY') return 'border-l-4 border-red-500';
@@ -57,6 +72,7 @@ export default function DoctorDashboard() {
   const [recording, setRecording] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const recognitionRef = useRef(null);
+  const panelRequestRef = useRef(0);
 
   // SOAP
   const [soapLoading, setSoapLoading] = useState(false);
@@ -96,19 +112,8 @@ export default function DoctorDashboard() {
     return () => unsubscribe();
   }, []);
 
-  // ── DECISION PANEL live onSnapshot on visit doc ──
-  useEffect(() => {
-    if (!visit?.id) return;
-
-    const unsubscribe = onSnapshot(doc(db, 'visits', visit.id), (snap) => {
-      if (snap.exists()) {
-        const panel = snap.data().decisionPanel || [];
-        setDecisionPanel(panel);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [visit?.id]);
+  // Note: do not sync decisionPanel from Firestore onSnapshot — it races the /panel API
+  // and often wipes insights right after a successful response.
 
   // ── SPEECH RECOGNITION ──
   useEffect(() => {
@@ -167,6 +172,25 @@ export default function DoctorDashboard() {
       const loadedVisit = visitRes.data.visit;
       setVisit(loadedVisit);
 
+      // Restore SOAP / prescription if doctor reopens this case
+      const sn = loadedVisit.soapNote || {};
+      const hasSoap = sn.subjective || sn.objective || sn.assessment || sn.plan;
+      if (hasSoap || (loadedVisit.prescription?.length > 0) || (loadedVisit.healthTips?.length > 0)) {
+        setSoapNote({
+          subjective: sn.subjective || '',
+          objective: sn.objective || '',
+          assessment: sn.assessment || '',
+          plan: sn.plan || '',
+        });
+        setPrescription(loadedVisit.prescription || []);
+        setHealthTips(loadedVisit.healthTips || []);
+        // Avoid stale "green" validation when SOAP text was never saved
+        setPrescriptionValidation(hasSoap ? loadedVisit.prescriptionValidation || null : null);
+      }
+      if (Array.isArray(loadedVisit.decisionPanel) && loadedVisit.decisionPanel.length > 0) {
+        setDecisionPanel(loadedVisit.decisionPanel);
+      }
+
       // Fetch patient only if patientId exists
       if (appt.patientId) {
         try {
@@ -187,18 +211,29 @@ export default function DoctorDashboard() {
     }
   }
 
-  async function triggerPanel(visitId) {
+  const soapReady = hasSoapContent(soapNote);
+  const medList = medicinesFromState(soapNote, prescription);
+  const canApprove =
+    soapReady &&
+    medList.length > 0 &&
+    prescriptionValidation?.isCorrect === true;
+
+  async function triggerPanel(visitId, consultationTranscript) {
+    const reqId = ++panelRequestRef.current;
     setPanelLoading(true);
     setPanelError('');
     try {
-      const { data } = await client.post('/api/consultation/panel', { visitId });
-      if (data.insights && data.insights.length > 0) {
-        setDecisionPanel(data.insights);
-      }
+      const { data } = await client.post('/api/consultation/panel', {
+        visitId,
+        ...(consultationTranscript?.trim() ? { transcript: consultationTranscript.trim() } : {}),
+      });
+      if (reqId !== panelRequestRef.current) return;
+      setDecisionPanel(Array.isArray(data.insights) ? data.insights : []);
     } catch (err) {
+      if (reqId !== panelRequestRef.current) return;
       setPanelError(err.response?.data?.error || 'Failed to generate insights. Click Retry.');
     } finally {
-      setPanelLoading(false);
+      if (reqId === panelRequestRef.current) setPanelLoading(false);
     }
   }
 
@@ -207,6 +242,7 @@ export default function DoctorDashboard() {
     if (!visit?.id || !transcript.trim()) return;
     setSoapLoading(true);
     setSoapError('');
+    setConfirmStatus('');
     try {
       const { data } = await client.post('/api/consultation/soap', {
         visitId: visit.id,
@@ -216,6 +252,7 @@ export default function DoctorDashboard() {
       setPrescription(data.prescription || []);
       setHealthTips(data.healthTips || []);
       setPrescriptionValidation(data.prescriptionValidation || null);
+      await triggerPanel(visit.id, transcript.trim());
     } catch {
       setSoapError('Failed to generate SOAP note. Please try again.');
     } finally {
@@ -236,8 +273,10 @@ export default function DoctorDashboard() {
       setSoapNote(null);
       setHealthTips([]);
       setPrescriptionValidation(null);
-    } catch {
-      setConfirmStatus('Failed to confirm. Please try again.');
+    } catch (err) {
+      setConfirmStatus(
+        err.response?.data?.error || 'Failed to confirm. Please try again.'
+      );
     } finally {
       setConfirmLoading(false);
     }
@@ -400,6 +439,9 @@ export default function DoctorDashboard() {
                     >
                       {soapLoading ? 'Generating…' : 'Generate SOAP Note'}
                     </button>
+                    <p className="text-[11px] text-gray-500 leading-snug">
+                      After you stop recording, tap <strong>Generate SOAP Note</strong> so Gemini documents the visit, extracts medicines, and runs the safety check. (Manual step avoids running AI on half-finished notes.)
+                    </p>
 
                     {soapError && (
                       <p className="text-xs text-red-600">{soapError}</p>
@@ -419,11 +461,11 @@ export default function DoctorDashboard() {
                       ))}
 
                       {/* Prescription */}
-                      {prescription.length > 0 && (
+                      {medList.length > 0 && (
                         <div>
                           <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Prescription</p>
                           <ul className="space-y-1">
-                            {prescription.map((med, i) => (
+                            {medList.map((med, i) => (
                               <li key={i} className="text-sm text-gray-700 flex items-start gap-1">
                                 <span className="text-blue-500">•</span> {med}
                               </li>
@@ -472,10 +514,25 @@ export default function DoctorDashboard() {
                         </div>
                       )}
 
-                      {/* Approve Button */}
+                      {/* Approve — SOAP filled + medicines + AI validation must pass */}
+                      {!soapReady && (
+                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                          SOAP sections must be filled (run Generate SOAP Note after your notes are complete).
+                        </p>
+                      )}
+                      {soapReady && medList.length === 0 && (
+                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
+                          Add medicines in the transcript and generate SOAP again, or ensure the Plan section lists medications.
+                        </p>
+                      )}
+                      {soapReady && medList.length > 0 && prescriptionValidation && !prescriptionValidation.isCorrect && (
+                        <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
+                          AI flagged a prescription concern — fix the plan or medicines, then generate SOAP again. Approve stays off until the check passes.
+                        </p>
+                      )}
                       <button
                         onClick={handleConfirm}
-                        disabled={confirmLoading}
+                        disabled={confirmLoading || !canApprove}
                         className="w-full bg-green-600 text-white py-2.5 rounded-lg text-sm font-bold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed mt-1 flex items-center justify-center gap-2"
                       >
                         {confirmLoading ? 'Sending…' : '✅ Approve & Send to Pharmacy'}
@@ -502,40 +559,83 @@ export default function DoctorDashboard() {
             <div className="flex-1 overflow-y-auto p-4">
               {!selectedAppt ? (
                 <p className="text-center text-gray-400 text-xs pt-6">Select a patient to view insights</p>
-              ) : panelLoading ? (
-                <div className="flex flex-col items-center pt-8 gap-3">
-                  <div className="w-5 h-5 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  <p className="text-xs text-gray-400">Generating insights…</p>
-                </div>
-              ) : panelError ? (
-                <div className="flex flex-col items-center pt-6 gap-3 px-2">
-                  <p className="text-xs text-red-500 text-center">{panelError}</p>
-                  <button
-                    onClick={() => visit?.id && triggerPanel(visit.id)}
-                    className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition"
-                  >
-                    Retry
-                  </button>
-                </div>
-              ) : decisionPanel.length === 0 ? (
-                <div className="flex flex-col items-center pt-6 gap-3 px-2">
-                  <p className="text-xs text-gray-400 text-center">No insights generated yet.</p>
-                  <button
-                    onClick={() => visit?.id && triggerPanel(visit.id)}
-                    className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition"
-                  >
-                    Generate Insights
-                  </button>
-                </div>
               ) : (
-                <ul className="space-y-3">
-                  {decisionPanel.map((insight, i) => (
-                    <li key={i} className="flex gap-2 text-sm text-gray-700">
-                      <span className="text-blue-500 font-bold shrink-0">{i + 1}.</span>
-                      <span>{insight}</span>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  {soapReady && prescriptionValidation && (
+                    <div
+                      className={`mb-4 rounded-lg border p-3 text-sm ${
+                        prescriptionValidation.isCorrect
+                          ? 'border-green-300 bg-green-50 text-green-900'
+                          : 'border-red-300 bg-red-50 text-red-900'
+                      }`}
+                    >
+                      <p className="font-bold text-xs uppercase tracking-wide mb-1">
+                        {prescriptionValidation.isCorrect ? 'Prescription check — OK' : 'Prescription check — review'}
+                      </p>
+                      {!prescriptionValidation.isCorrect && (
+                        <>
+                          <p className="font-semibold">Possible issue with medicines vs diagnosis / symptoms</p>
+                          {prescriptionValidation.message && (
+                            <p className="text-xs mt-1.5 leading-relaxed">{prescriptionValidation.message}</p>
+                          )}
+                          {prescriptionValidation.suggestedMedicines?.length > 0 && (
+                            <p className="text-xs mt-2 font-medium">
+                              Suggested alternatives: {prescriptionValidation.suggestedMedicines.join(', ')}
+                            </p>
+                          )}
+                        </>
+                      )}
+                      {prescriptionValidation.isCorrect && (
+                        <p className="text-xs mt-0.5">
+                          AI cross-checked listed medicines against the SOAP note — no conflict flagged. You can approve when ready.
+                        </p>
+                      )}
+                    </div>
+                  )}
+
+                  {panelLoading ? (
+                    <div className="flex flex-col items-center pt-4 gap-3">
+                      <div className="w-5 h-5 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                      <p className="text-xs text-gray-400">Generating insights…</p>
+                    </div>
+                  ) : panelError ? (
+                    <div className="flex flex-col items-center pt-4 gap-3 px-2">
+                      <p className="text-xs text-red-500 text-center">{panelError}</p>
+                      <button
+                        type="button"
+                        onClick={() => visit?.id && triggerPanel(visit.id, transcript)}
+                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  ) : decisionPanel.length === 0 ? (
+                    <div className="flex flex-col items-center pt-4 gap-3 px-2">
+                      <p className="text-xs text-gray-400 text-center">No clinical insights yet.</p>
+                      <button
+                        type="button"
+                        onClick={() => visit?.id && triggerPanel(visit.id, transcript)}
+                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+                      >
+                        Generate insights
+                      </button>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
+                        Clinical insights (triage context)
+                      </p>
+                      <ul className="space-y-3">
+                        {decisionPanel.map((insight, i) => (
+                          <li key={i} className="flex gap-2 text-sm text-gray-700">
+                            <span className="text-blue-500 font-bold shrink-0">{i + 1}.</span>
+                            <span>{insight}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
               )}
             </div>
           </div>

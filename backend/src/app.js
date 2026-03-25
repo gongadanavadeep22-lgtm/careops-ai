@@ -38,7 +38,13 @@ app.use('/api/emergency', require('./routes/emergency'));
 app.use('/api/pharmacy', require('./routes/pharmacy'));
 
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', service: 'CareOps API', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    service: 'CareOps API',
+    timestamp: new Date().toISOString(),
+    geminiKeySet: Boolean((process.env.GEMINI_API_KEY || '').trim()),
+    twilioKeySet: Boolean((process.env.TWILIO_ACCOUNT_SID || '').trim()),
+  });
 });
 
 app.use(errorHandler);
