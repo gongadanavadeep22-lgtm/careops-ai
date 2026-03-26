@@ -48,7 +48,7 @@ export default function App() {
             path="/pharmacy"
             element={
               <ProtectedRoute>
-                <RoleRoute allowedRoles={['pharmacist']}>
+                <RoleRoute allowedRoles={['pharmacist', 'doctor']}>
                   <PharmacyDashboard />
                 </RoleRoute>
               </ProtectedRoute>

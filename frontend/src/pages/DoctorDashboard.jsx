@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import client from '../api/client';
-import Navbar from '../components/Navbar';
+import Layout from '../components/Layout';
 // LoadingSpinner available if needed for future use
 import EmergencyBanner from '../components/EmergencyBanner';
 
@@ -436,9 +436,8 @@ export default function DoctorDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <Layout>
       <EmergencyBanner />
-      <Navbar />
 
       <div className="max-w-[1400px] mx-auto px-4 py-6">
         <div className="mb-4">
@@ -813,6 +812,6 @@ export default function DoctorDashboard() {
 
         </div>
       </div>
-    </div>
+    </Layout>
   );
 }

@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import client from '../api/client';
-import Navbar from '../components/Navbar';
+import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 function medicinesForVisit(visit) {
@@ -154,9 +154,7 @@ export default function PharmacyDashboard() {
   }
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <Navbar />
-
+    <Layout>
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-10">
         <div>
           <h1 className="text-2xl font-bold text-gray-800">Pharmacy Dashboard</h1>
@@ -363,6 +361,6 @@ export default function PharmacyDashboard() {
           )}
         </section>
       </div>
-    </div>
+    </Layout>
   );
 }
