@@ -1,5 +1,11 @@
 const twilio = require('twilio');
 
+const _sid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
+const _token = (process.env.TWILIO_AUTH_TOKEN || '').trim();
+if (!_sid || !_token) {
+  console.error('[Twilio] TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN missing at startup');
+}
+
 /**
  * Railway env (all required for WhatsApp):
  * - TWILIO_ACCOUNT_SID   (starts with AC...)
@@ -49,11 +55,20 @@ async function sendWhatsApp(toPhone, message) {
   const client = twilio(sid, token);
   const to = normalizeWhatsAppTo(toPhone);
 
-  await client.messages.create({
-    from,
-    to,
-    body: message,
-  });
+  try {
+    console.log('[Twilio] Sending WhatsApp (to suffix):', String(to).slice(-8));
+    const result = await client.messages.create({
+      from,
+      to,
+      body: message,
+    });
+    console.log('[Twilio] WhatsApp sent. SID:', result.sid, 'status:', result.status);
+    return { success: true, sid: result.sid, status: result.status };
+  } catch (error) {
+    console.error('[Twilio] sendWhatsApp error full:', error);
+    console.error('[Twilio] message:', error.message, 'code:', error.code);
+    throw error;
+  }
 }
 
 module.exports = { sendWhatsApp };
