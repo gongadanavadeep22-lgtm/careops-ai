@@ -231,10 +231,10 @@ export default function Login() {
         <div className="flex w-full shrink-0 flex-col justify-center border-t border-gray-100 bg-white px-6 py-8 sm:px-10 sm:py-10 lg:w-[min(100%,460px)] lg:border-l lg:border-t-0 lg:py-12 xl:w-[min(100%,480px)]">
           <div className="mb-6 flex justify-center sm:mb-7">
             <img
-              src="/logo-careops.svg"
+              src="/logo-careops.png"
               alt="CareOps AI"
               width={220}
-              height={132}
+              height={220}
               className="h-[6.75rem] w-auto max-h-[8.5rem] max-w-[min(100%,15.5rem)] object-contain sm:h-[7.75rem] sm:max-w-[17rem]"
             />
           </div>
