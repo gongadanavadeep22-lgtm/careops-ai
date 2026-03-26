@@ -3,8 +3,20 @@ import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { db } from '../firebase/config';
 import client from '../api/client';
 import Layout from '../components/Layout';
-// LoadingSpinner available if needed for future use
 import EmergencyBanner from '../components/EmergencyBanner';
+import {
+  Loader2,
+  Stethoscope,
+  Sparkles,
+  AlertTriangle,
+  BarChart3,
+  Shield,
+  Heart,
+  Thermometer,
+  Activity,
+  Mic,
+  AlertCircle,
+} from 'lucide-react';
 
 const URGENCY_ORDER = { EMERGENCY: 0, PRIORITY: 1, GENERAL: 2 };
 
@@ -35,6 +47,19 @@ function urgencyBadgeStyle(urgency) {
   return 'bg-green-100 text-green-700 border border-green-300';
 }
 
+function splitPills(text) {
+  if (!text || !String(text).trim()) return [];
+  return String(text)
+    .split(/[,\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function patientInitial(name) {
+  const s = String(name || '').trim();
+  return s ? s[0].toUpperCase() : '?';
+}
+
 function WaitTime({ createdAt }) {
   const [display, setDisplay] = useState('');
 
@@ -42,15 +67,15 @@ function WaitTime({ createdAt }) {
     function calc() {
       if (!createdAt) return setDisplay('');
       const ts = createdAt?.toDate ? createdAt.toDate() : new Date(createdAt);
-      const diff = Math.floor((Date.now() - ts.getTime()) / 60000);
-      setDisplay(diff < 1 ? 'Just arrived' : `${diff}m waiting`);
+      const diffMin = Math.floor((Date.now() - ts.getTime()) / 60000);
+      setDisplay(diffMin < 1 ? 'Just now' : `${diffMin} min ago`);
     }
     calc();
     const id = setInterval(calc, 60000);
     return () => clearInterval(id);
   }, [createdAt]);
 
-  return <span className="text-xs text-gray-400">{display}</span>;
+  return <span className="text-xs text-gray-500">{display}</span>;
 }
 
 export default function DoctorDashboard() {
@@ -222,24 +247,6 @@ export default function DoctorDashboard() {
     const reqId = ++panelRequestRef.current;
     setPanelLoading(true);
     setPanelError('');
-    // #region agent log
-    fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
-      body: JSON.stringify({
-        sessionId: '74527c',
-        hypothesisId: 'H1',
-        location: 'DoctorDashboard.jsx:triggerPanel:start',
-        message: 'panel request start',
-        data: {
-          hasBaseUrl: Boolean(import.meta.env.VITE_API_URL),
-          visitIdLen: String(visitId || '').length,
-          transcriptLen: consultationTranscript?.trim?.()?.length ?? 0,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     try {
       const { data } = await client.post('/api/consultation/panel', {
         visitId,
@@ -247,41 +254,9 @@ export default function DoctorDashboard() {
       });
       if (reqId !== panelRequestRef.current) return;
       setDecisionPanel(Array.isArray(data.insights) ? data.insights : []);
-      // #region agent log
-      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
-        body: JSON.stringify({
-          sessionId: '74527c',
-          hypothesisId: 'H4',
-          location: 'DoctorDashboard.jsx:triggerPanel:ok',
-          message: 'panel ok',
-          data: { insightsCount: Array.isArray(data.insights) ? data.insights.length : -1 },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     } catch (err) {
       if (reqId !== panelRequestRef.current) return;
       setPanelError(err.response?.data?.error || 'Failed to generate insights. Click Retry.');
-      // #region agent log
-      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
-        body: JSON.stringify({
-          sessionId: '74527c',
-          hypothesisId: 'H1',
-          location: 'DoctorDashboard.jsx:triggerPanel:err',
-          message: 'panel failed',
-          data: {
-            status: err.response?.status ?? null,
-            hasResponse: Boolean(err.response),
-            errSnippet: String(err.response?.data?.error || err.message || '').slice(0, 80),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     } finally {
       if (reqId === panelRequestRef.current) setPanelLoading(false);
     }
@@ -302,42 +277,8 @@ export default function DoctorDashboard() {
       setPrescription(data.prescription || []);
       setHealthTips(data.healthTips || []);
       setPrescriptionValidation(data.prescriptionValidation || null);
-      // #region agent log
-      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
-        body: JSON.stringify({
-          sessionId: '74527c',
-          hypothesisId: 'H4',
-          location: 'DoctorDashboard.jsx:soap:ok',
-          message: 'soap client ok',
-          data: {
-            rxCount: (data.prescription || []).length,
-            subjLen: String(data.soapNote?.subjective || '').length,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       await triggerPanel(visit.id, transcript.trim());
     } catch (err) {
-      // #region agent log
-      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
-        body: JSON.stringify({
-          sessionId: '74527c',
-          hypothesisId: 'H1',
-          location: 'DoctorDashboard.jsx:soap:err',
-          message: 'soap client fail',
-          data: {
-            status: err.response?.status ?? null,
-            hasResponse: Boolean(err.response),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setSoapError('Failed to generate SOAP note. Please try again.');
     } finally {
       setSoapLoading(false);
@@ -349,24 +290,6 @@ export default function DoctorDashboard() {
     if (!visit?.id) return;
     // Server uses Firestore, not only screen state — must match saved SOAP / prescription
     if (!canApprove) {
-      // #region agent log
-      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
-        body: JSON.stringify({
-          sessionId: '74527c',
-          hypothesisId: 'H3',
-          location: 'DoctorDashboard.jsx:handleConfirm:blocked',
-          message: 'confirm blocked by canApprove',
-          data: {
-            soapReady,
-            medListLen: medList.length,
-            validationOk: prescriptionValidation?.isCorrect === true,
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
       setConfirmStatus(
         'Complete Generate SOAP Note with medicines (or plan text) and a passing AI check before sending.'
       );
@@ -383,20 +306,6 @@ export default function DoctorDashboard() {
       setSoapNote(null);
       setHealthTips([]);
       setPrescriptionValidation(null);
-      // #region agent log
-      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
-        body: JSON.stringify({
-          sessionId: '74527c',
-          hypothesisId: 'H5',
-          location: 'DoctorDashboard.jsx:handleConfirm:ok',
-          message: 'confirm client ok',
-          data: {},
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     } catch (err) {
       const status = err.response?.status;
       const bodyErr = err.response?.data?.error || err.response?.data?.message;
@@ -412,24 +321,6 @@ export default function DoctorDashboard() {
         'Failed to confirm. Please try again.';
       if (status) msg = `${msg} (HTTP ${status})`;
       setConfirmStatus(msg);
-      // #region agent log
-      fetch('http://127.0.0.1:7641/ingest/a3b49e1c-22af-442e-8175-8faad2b83bc7', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '74527c' },
-        body: JSON.stringify({
-          sessionId: '74527c',
-          hypothesisId: 'H1',
-          location: 'DoctorDashboard.jsx:handleConfirm:err',
-          message: 'confirm client fail',
-          data: {
-            status: err.response?.status ?? null,
-            hasResponse: Boolean(err.response),
-            errSnippet: String(bodyErr || err.message || '').slice(0, 100),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
     } finally {
       setConfirmLoading(false);
     }
@@ -439,190 +330,259 @@ export default function DoctorDashboard() {
     <Layout>
       <EmergencyBanner />
 
-      <div className="max-w-[1400px] mx-auto px-4 py-6">
-        <div className="mb-4">
-          <h1 className="text-2xl font-bold text-gray-800">Doctor Dashboard</h1>
+      <div className="max-w-[1600px] mx-auto px-4 py-6 min-h-0">
+        <div className="mb-6">
+          <h1 className="text-2xl font-bold text-gray-900">Doctor Dashboard</h1>
           <p className="text-gray-500 text-sm mt-1">Live patient queue and consultation management</p>
         </div>
 
-        <div className="flex gap-4 h-[calc(100vh-160px)]">
+        <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-11rem)] max-h-[calc(100vh-8rem)]">
 
-          {/* ── LEFT COLUMN — LIVE QUEUE (35%) ── */}
-          <div className="w-[35%] flex flex-col bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b bg-gray-50">
-              <h2 className="font-semibold text-gray-700 text-sm">
-                {queueLoading ? 'Loading…' : `${queue.length} patient${queue.length !== 1 ? 's' : ''} waiting`}
-              </h2>
+          {/* LEFT — Live queue */}
+          <div className="flex-[3] min-w-0 flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/80">
+              <div className="flex items-center gap-2">
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-medical-green opacity-60" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-medical-green" />
+                </span>
+                <h2 className="font-semibold text-gray-900 text-sm">Live Queue</h2>
+              </div>
+              <span className="text-xs font-semibold rounded-full bg-primary-100 text-primary-700 px-2.5 py-0.5">
+                {queueLoading ? '…' : queue.length} waiting
+              </span>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+            <div className="flex-1 overflow-y-auto p-3 space-y-2 min-h-0">
               {queueLoading ? (
-                <div className="flex justify-center pt-8">
-                  <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <div className="flex justify-center py-10">
+                  <Loader2 className="h-8 w-8 text-primary-600 animate-spin" aria-hidden />
                 </div>
               ) : queue.length === 0 ? (
-                <p className="text-center text-gray-400 text-sm pt-8">No patients waiting</p>
+                <p className="text-center text-gray-400 text-sm py-10">No patients waiting</p>
               ) : (
-                queue.map((appt) => (
-                  <button
-                    key={appt.id}
-                    onClick={() => handleSelectPatient(appt)}
-                    className={`w-full text-left p-3 rounded-lg bg-white hover:bg-gray-50 transition ${urgencyBorderColor(appt.urgency)} ${
-                      selectedAppt?.id === appt.id ? 'ring-2 ring-blue-400 bg-blue-50' : 'border border-gray-200'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="font-semibold text-gray-800 text-sm">{appt.patientName}</span>
-                      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${urgencyBadgeStyle(appt.urgency)}`}>
-                        {appt.urgency || 'GENERAL'}
-                      </span>
-                    </div>
-                    <WaitTime createdAt={appt.createdAt} />
-                    <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                      {appt.symptoms?.slice(0, 80)}{appt.symptoms?.length > 80 ? '…' : ''}
-                    </p>
-                  </button>
-                ))
+                queue.map((appt) => {
+                  const sel = selectedAppt?.id === appt.id;
+                  return (
+                    <button
+                      key={appt.id}
+                      type="button"
+                      onClick={() => handleSelectPatient(appt)}
+                      className={`w-full text-left rounded-xl border p-3 transition hover:shadow-md ${urgencyBorderColor(appt.urgency)} ${
+                        sel ? 'border-l-4 border-primary-600 bg-primary-50 ring-1 ring-primary-200' : 'border-gray-200 bg-white'
+                      }`}
+                    >
+                      <div className="flex gap-3">
+                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-bold text-primary-800">
+                          {patientInitial(appt.patientName)}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="font-semibold text-gray-900 text-sm truncate">{appt.patientName}</span>
+                            <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${urgencyBadgeStyle(appt.urgency)}`}>
+                              {appt.urgency || 'GENERAL'}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            <WaitTime createdAt={appt.createdAt} />
+                          </p>
+                          <p className="text-xs text-gray-600 mt-1 line-clamp-2">
+                            {appt.symptoms}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })
               )}
             </div>
           </div>
 
-          {/* ── CENTER COLUMN — PATIENT CASE (40%) ── */}
-          <div className="w-[40%] flex flex-col bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b bg-gray-50">
-              <h2 className="font-semibold text-gray-700 text-sm">
-                {selectedAppt ? selectedAppt.patientName : 'Select a patient'}
+          {/* CENTER — Patient case */}
+          <div className="flex-[4.5] min-w-0 flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+            <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/80">
+              <h2 className="font-semibold text-gray-900 text-sm">
+                {selectedAppt ? selectedAppt.patientName : 'Patient case'}
               </h2>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 min-h-0">
               {!selectedAppt ? (
-                <p className="text-center text-gray-400 text-sm pt-8">Click a patient card to view their case</p>
+                <div className="flex flex-col items-center justify-center py-16 text-center px-4">
+                  <Stethoscope className="h-14 w-14 text-gray-300 mb-3" strokeWidth={1.25} aria-hidden />
+                  <p className="text-gray-600 font-medium">Select a patient to view their case</p>
+                  <p className="text-xs text-gray-400 mt-1">Choose someone from the live queue</p>
+                </div>
               ) : caseLoading ? (
-                <div className="flex justify-center pt-8">
-                  <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <div className="flex justify-center py-16">
+                  <Loader2 className="h-8 w-8 text-primary-600 animate-spin" aria-hidden />
                 </div>
               ) : caseError ? (
-                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{caseError}</p>
+                <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+                  <AlertCircle className="h-5 w-5 shrink-0 text-red-600" aria-hidden />
+                  <span>{caseError}</span>
+                </div>
               ) : (
                 <>
-                  {/* Demographics */}
-                  <div className="space-y-1">
-                    <p className="text-sm text-gray-600">
-                      <span className="font-medium">Age:</span> {patient?.age || 'N/A'}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      <span className="font-medium">Area:</span> {patient?.area || 'N/A'}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      <span className="font-medium">Conditions:</span> {patient?.conditions || 'None'}
-                    </p>
-                    {patient?.allergies && (
-                      <p className="text-sm font-semibold text-red-600 bg-red-50 border border-red-200 rounded px-2 py-1">
-                        ⚠ Allergies: {patient.allergies}
-                      </p>
-                    )}
-                    <p className="text-sm text-gray-600">
-                      <span className="font-medium">Today's symptoms:</span> {visit?.symptoms || 'N/A'}
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 mb-2">
+                      <h3 className="text-lg font-bold text-gray-900">{selectedAppt.patientName}</h3>
+                      <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${urgencyBadgeStyle(selectedAppt.urgency)}`}>
+                        {selectedAppt.urgency || 'GENERAL'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Age {patient?.age ?? '—'} · {patient?.area || 'Area not set'} · Dr. {selectedAppt.doctorName || '—'}
                     </p>
                   </div>
 
-                  {/* Vitals */}
+                  <div className="rounded-xl border border-red-100 bg-red-50/80 p-4">
+                    <h4 className="text-sm font-bold text-red-800 mb-2">Allergies</h4>
+                    {splitPills(patient?.allergies).length === 0 ? (
+                      <p className="text-xs text-red-700/70">No allergies recorded</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {splitPills(patient?.allergies).map((a) => (
+                          <span key={a} className="inline-flex rounded-full bg-red-100 px-2.5 py-1 text-xs font-medium text-red-900 border border-red-200">
+                            {a}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl border border-blue-100 bg-blue-50/80 p-4">
+                    <h4 className="text-sm font-bold text-blue-900 mb-2">Conditions</h4>
+                    {(() => {
+                      const raw = patient?.conditions;
+                      const list =
+                        raw && String(raw).trim() && String(raw).toLowerCase() !== 'none'
+                          ? splitPills(raw)
+                          : [];
+                      return list.length === 0 ? (
+                        <p className="text-xs text-blue-800/70">No conditions recorded</p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {list.map((c) => (
+                            <span
+                              key={c}
+                              className="inline-flex rounded-full bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-900 border border-blue-200"
+                            >
+                              {c}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    })()}
+                  </div>
+
                   {visit?.vitals && Object.keys(visit.vitals).length > 0 && (
                     <div className="grid grid-cols-3 gap-2">
                       {[
-                        { label: 'BP', value: visit.vitals.bp },
-                        { label: 'Temp °F', value: visit.vitals.temperature },
-                        { label: 'SpO2 %', value: visit.vitals.spo2 },
-                      ].map(({ label, value }) => (
-                        <div key={label} className="bg-blue-50 rounded-lg p-3 text-center">
-                          <p className="text-xs text-blue-500 font-medium">{label}</p>
-                          <p className="text-lg font-bold text-blue-700">{value || '—'}</p>
+                        { label: 'Blood pressure', sub: 'BP', value: visit.vitals.bp, Icon: Heart },
+                        { label: 'Temperature', sub: '°F', value: visit.vitals.temperature, Icon: Thermometer },
+                        { label: 'SpO2', sub: '%', value: visit.vitals.spo2, Icon: Activity },
+                      ].map(({ label, sub, value, Icon }) => (
+                        <div key={label} className="rounded-xl border border-gray-100 bg-white p-3 text-center shadow-sm">
+                          <Icon className="h-5 w-5 mx-auto text-primary-600 mb-1" aria-hidden />
+                          <p className="text-lg font-bold text-gray-900">{value || '—'}</p>
+                          <p className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</p>
                         </div>
                       ))}
                     </div>
                   )}
 
-                  {/* Voice Recorder */}
-                  <div className="border rounded-lg p-3 space-y-2">
-                    <h3 className="text-sm font-semibold text-gray-700">Consultation Notes</h3>
+                  <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+                    <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Today&apos;s symptoms</p>
+                    <p className="text-sm text-gray-800">{visit?.symptoms || '—'}</p>
+                  </div>
+
+                  <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
+                    <h3 className="text-sm font-semibold text-gray-900">Consultation Notes</h3>
 
                     {speechSupported ? (
-                      <div className="space-y-2">
-                        <div className="flex gap-2">
-                          {!recording ? (
-                            <button
-                              onClick={startRecording}
-                              className="bg-red-500 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-red-600 transition flex items-center gap-1"
-                            >
-                              <span className="w-2 h-2 rounded-full bg-white inline-block" />
-                              Start Recording
-                            </button>
-                          ) : (
-                            <button
-                              onClick={stopRecording}
-                              className="bg-gray-700 text-white px-3 py-1.5 rounded-lg text-sm font-medium hover:bg-gray-800 transition flex items-center gap-2"
-                            >
-                              <span className="w-2 h-2 rounded-full bg-red-400 animate-pulse inline-block" />
-                              Stop Recording
-                            </button>
-                          )}
-                        </div>
-                        {transcript && (
-                          <p className="text-xs text-gray-600 bg-gray-50 rounded p-2 max-h-20 overflow-y-auto">
-                            {transcript}
-                          </p>
-                        )}
+                      <div className="space-y-3 flex flex-col items-center">
+                        <button
+                          type="button"
+                          onClick={recording ? stopRecording : startRecording}
+                          className={`flex h-20 w-20 items-center justify-center rounded-full text-white shadow-lg transition hover:scale-105 focus:outline-none focus:ring-4 focus:ring-primary-300 ${
+                            recording ? 'bg-gray-700 animate-pulse' : 'bg-primary-600 hover:bg-primary-700'
+                          }`}
+                          aria-pressed={recording}
+                        >
+                          <Mic className="h-9 w-9" strokeWidth={2} aria-hidden />
+                        </button>
+                        <p className="text-xs font-medium text-gray-600">{recording ? 'Stop Recording' : 'Start Recording'}</p>
+                        <textarea
+                          readOnly
+                          value={transcript}
+                          placeholder="Live transcript appears here…"
+                          rows={5}
+                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 resize-none min-h-[100px]"
+                        />
                       </div>
                     ) : (
                       <textarea
                         value={transcript}
                         onChange={(e) => setTranscript(e.target.value)}
-                        placeholder="Type your consultation notes here"
-                        rows={4}
-                        className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                        placeholder="Type consultation notes here"
+                        rows={5}
+                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30 resize-none"
                       />
                     )}
 
                     <button
+                      type="button"
                       onClick={handleGenerateSOAP}
                       disabled={soapLoading || !transcript.trim()}
-                      className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {soapLoading ? 'Generating…' : 'Generate SOAP Note'}
+                      {soapLoading ? (
+                        <span className="inline-flex items-center justify-center gap-2">
+                          <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                          Generating…
+                        </span>
+                      ) : (
+                        'Generate SOAP Note'
+                      )}
                     </button>
                     <p className="text-[11px] text-gray-500 leading-snug">
                       After you stop recording, tap <strong>Generate SOAP Note</strong> so Gemini documents the visit, extracts medicines, and runs the safety check. (Manual step avoids running AI on half-finished notes.)
                     </p>
 
                     {soapError && (
-                      <p className="text-xs text-red-600">{soapError}</p>
+                      <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-800">
+                        <AlertCircle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" aria-hidden />
+                        <span>{soapError}</span>
+                      </div>
                     )}
                   </div>
 
                   {/* SOAP Note */}
                   {soapNote && (
-                    <div className="border rounded-lg p-3 space-y-3">
-                      <h3 className="text-sm font-semibold text-gray-700">SOAP Note</h3>
+                    <div className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
+                      <h3 className="text-sm font-semibold text-gray-900">SOAP Note</h3>
 
                       {['subjective', 'objective', 'assessment', 'plan'].map((key) => (
                         <div key={key}>
-                          <p className="text-xs font-semibold text-gray-500 uppercase">{key}</p>
-                          <p className="text-sm text-gray-700">{soapNote[key] || '—'}</p>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{key}</p>
+                          <p className="text-sm text-gray-800">{soapNote[key] || '—'}</p>
                         </div>
                       ))}
 
-                      {/* Prescription */}
                       {medList.length > 0 && (
                         <div>
-                          <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Prescription</p>
-                          <ul className="space-y-1">
+                          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Prescription</p>
+                          <div className="flex flex-wrap gap-2">
                             {medList.map((med, i) => (
-                              <li key={i} className="text-sm text-gray-700 flex items-start gap-1">
-                                <span className="text-blue-500">•</span> {med}
-                              </li>
+                              <span
+                                key={i}
+                                className="inline-flex rounded-full bg-primary-50 px-3 py-1 text-xs font-medium text-primary-800 border border-primary-100"
+                              >
+                                {typeof med === 'string' ? med : med?.name || String(med)}
+                              </span>
                             ))}
-                          </ul>
+                          </div>
                         </div>
                       )}
 
@@ -690,17 +650,22 @@ export default function DoctorDashboard() {
                         type="button"
                         onClick={handleConfirm}
                         disabled={confirmLoading || !canApprove}
-                        className={`w-full py-2.5 rounded-lg text-sm font-bold transition mt-1 flex items-center justify-center gap-2 ${
+                        className={`w-full py-3 rounded-lg text-sm font-bold transition mt-1 flex items-center justify-center gap-2 ${
                           canApprove && !confirmLoading
-                            ? 'bg-green-600 text-white hover:bg-green-700 shadow-sm'
+                            ? 'bg-medical-green text-white hover:opacity-95 shadow-sm'
                             : 'bg-gray-300 text-gray-600 cursor-not-allowed'
                         }`}
                       >
-                        {confirmLoading
-                          ? 'Sending…'
-                          : canApprove
-                            ? '✅ Approve & Send to Pharmacy'
-                            : '🔒 Approve & Send to Pharmacy — locked'}
+                        {confirmLoading ? (
+                          <span className="inline-flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                            Sending…
+                          </span>
+                        ) : canApprove ? (
+                          'Confirm and Send to Pharmacy'
+                        ) : (
+                          'Confirm and Send to Pharmacy — locked'
+                        )}
                       </button>
                       {!canApprove && !confirmLoading && (
                         <p className="text-[11px] text-gray-500 text-center mt-1">
@@ -720,20 +685,21 @@ export default function DoctorDashboard() {
             </div>
           </div>
 
-          {/* ── RIGHT COLUMN — DECISION PANEL (25%) ── */}
-          <div className="w-[25%] flex flex-col bg-white rounded-xl shadow-sm overflow-hidden">
-            <div className="px-4 py-3 border-b bg-gray-50">
-              <h2 className="font-semibold text-gray-700 text-sm">AI Decision Panel</h2>
+          {/* RIGHT — AI Decision Panel */}
+          <div className="flex-[2.5] min-w-0 flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/80">
+              <Sparkles className="h-4 w-4 text-primary-600 shrink-0" aria-hidden />
+              <h2 className="font-semibold text-gray-900 text-sm">AI Decision Panel</h2>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4">
+            <div className="flex-1 overflow-y-auto p-4 min-h-0">
               {!selectedAppt ? (
                 <p className="text-center text-gray-400 text-xs pt-6">Select a patient to view insights</p>
               ) : (
                 <>
                   {soapReady && prescriptionValidation && (
                     <div
-                      className={`mb-4 rounded-lg border p-3 text-sm ${
+                      className={`mb-4 rounded-xl border p-3 text-sm ${
                         prescriptionValidation.isCorrect
                           ? 'border-green-300 bg-green-50 text-green-900'
                           : 'border-red-300 bg-red-50 text-red-900'
@@ -764,17 +730,17 @@ export default function DoctorDashboard() {
                   )}
 
                   {panelLoading ? (
-                    <div className="flex flex-col items-center pt-4 gap-3">
-                      <div className="w-5 h-5 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                      <p className="text-xs text-gray-400">Generating insights…</p>
+                    <div className="flex flex-col items-center pt-6 gap-3">
+                      <Loader2 className="h-6 w-6 text-primary-600 animate-spin" aria-hidden />
+                      <p className="text-xs text-gray-500">Generating insights</p>
                     </div>
                   ) : panelError ? (
                     <div className="flex flex-col items-center pt-4 gap-3 px-2">
-                      <p className="text-xs text-red-500 text-center">{panelError}</p>
+                      <p className="text-xs text-red-600 text-center">{panelError}</p>
                       <button
                         type="button"
                         onClick={() => visit?.id && triggerPanel(visit.id, transcript)}
-                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+                        className="rounded-lg border border-primary-600 bg-white px-4 py-2 text-xs font-semibold text-primary-600 hover:bg-primary-50 transition"
                       >
                         Retry
                       </button>
@@ -785,25 +751,43 @@ export default function DoctorDashboard() {
                       <button
                         type="button"
                         onClick={() => visit?.id && triggerPanel(visit.id, transcript)}
-                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition"
+                        className="rounded-lg bg-primary-600 px-4 py-2 text-xs font-semibold text-white hover:bg-primary-700 transition"
                       >
                         Generate insights
                       </button>
                     </div>
                   ) : (
-                    <>
-                      <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wide mb-2">
-                        Clinical insights (triage context)
-                      </p>
-                      <ul className="space-y-3">
-                        {decisionPanel.map((insight, i) => (
-                          <li key={i} className="flex gap-2 text-sm text-gray-700">
-                            <span className="text-blue-500 font-bold shrink-0">{i + 1}.</span>
-                            <span>{insight}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
+                    <div className="space-y-3">
+                      {decisionPanel.slice(0, 3).map((insight, i) => {
+                        const cfg = [
+                          { Icon: AlertTriangle, bar: 'border-l-4 border-amber-400', bg: 'bg-amber-50/90' },
+                          { Icon: BarChart3, bar: 'border-l-4 border-blue-500', bg: 'bg-blue-50/90' },
+                          { Icon: Shield, bar: 'border-l-4 border-red-500', bg: 'bg-red-50/90' },
+                        ][i];
+                        const Icon = cfg.Icon;
+                        return (
+                          <div
+                            key={i}
+                            className={`rounded-lg border border-gray-100 pl-3 pr-3 py-2.5 ${cfg.bar} ${cfg.bg}`}
+                          >
+                            <div className="flex gap-2">
+                              <Icon className="h-4 w-4 shrink-0 text-gray-700 mt-0.5" aria-hidden />
+                              <p className="text-xs text-gray-800 leading-snug">{insight}</p>
+                            </div>
+                          </div>
+                        );
+                      })}
+                      {decisionPanel.length > 3 && (
+                        <div className="space-y-2 pt-1 border-t border-gray-100">
+                          <p className="text-[10px] font-semibold text-gray-400 uppercase">More</p>
+                          {decisionPanel.slice(3).map((insight, i) => (
+                            <div key={`extra-${i}`} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
+                              {insight}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </>
               )}

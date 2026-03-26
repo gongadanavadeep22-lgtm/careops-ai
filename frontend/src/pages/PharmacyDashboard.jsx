@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { Loader2 } from 'lucide-react';
 import { db } from '../firebase/config';
 import client from '../api/client';
 import Layout from '../components/Layout';
@@ -32,6 +33,21 @@ function phoneOnVisit(visit) {
   const p = visit?.patientPhone;
   if (p != null && String(p).trim()) return String(p).trim();
   return '';
+}
+
+/** Numeric total from visit if present (hide badge / row when null). */
+function amountForVisit(visit) {
+  if (!visit) return null;
+  const raw = visit.totalAmount ?? visit.total ?? visit.amountTotal ?? visit.amount;
+  if (raw == null || raw === '') return null;
+  if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+  const n = parseFloat(String(raw).replace(/[^\d.]/g, ''));
+  if (Number.isNaN(n)) return null;
+  return n;
+}
+
+function formatAmountInr(n) {
+  return `₹${Number(n).toLocaleString('en-IN')}`;
 }
 
 export default function PharmacyDashboard() {
@@ -157,8 +173,8 @@ export default function PharmacyDashboard() {
     <Layout>
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-10">
         <div>
-          <h1 className="text-2xl font-bold text-gray-800">Pharmacy Dashboard</h1>
-          <p className="text-gray-500 text-sm mt-1">Manage prescriptions and patient notifications</p>
+          <h1 className="text-2xl font-bold text-gray-900">Pharmacy Queue</h1>
+          <p className="mt-1 text-sm text-gray-500">Manage prescriptions and patient dispensing</p>
         </div>
 
         {/* ── SECTION 1 — ACTIVE PRESCRIPTIONS ── */}
@@ -181,7 +197,9 @@ export default function PharmacyDashboard() {
             </div>
           ) : (
             <div className="space-y-4">
-              {active.map((visit) => (
+              {active.map((visit) => {
+                const visitAmount = amountForVisit(visit);
+                return (
                 <div key={visit.id}>
                   {/* Prescription Card — click to open detail */}
                   <button
@@ -259,24 +277,32 @@ export default function PharmacyDashboard() {
                         )}
                       </div>
 
-                      {/* Total Amount */}
-                      <div className="bg-green-50 border border-green-200 rounded-lg px-4 py-3 flex items-center justify-between">
-                        <span className="text-sm font-semibold text-gray-700">Total Amount</span>
-                        <span className="text-xl font-bold text-green-700">₹1000</span>
-                      </div>
+                      {/* Total Amount — only when visit has an amount */}
+                      {visitAmount != null && (
+                        <div className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 px-4 py-3">
+                          <span className="text-sm font-semibold text-gray-700">Total Amount</span>
+                          <span className="text-xl font-bold text-green-700">{formatAmountInr(visitAmount)}</span>
+                        </div>
+                      )}
 
-                      {/* Submit Button */}
+                      {/* Mark as Ready */}
                       {!readyStatus && (
                         <button
+                          type="button"
                           onClick={handleMarkReady}
                           disabled={readyLoading || (!phoneLoading && !patientPhone)}
-                          className="w-full bg-green-600 text-white py-3 rounded-xl text-sm font-bold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                          className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
                         >
-                          {readyLoading
-                            ? 'Sending…'
-                            : !patientPhone && !phoneLoading
-                              ? '📵 Add patient phone first'
-                              : '📤 Submit & Send WhatsApp to Patient'}
+                          {readyLoading ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                              Sending…
+                            </>
+                          ) : !patientPhone && !phoneLoading ? (
+                            'Add patient phone first'
+                          ) : (
+                            'Mark as Ready'
+                          )}
                         </button>
                       )}
 
@@ -300,7 +326,8 @@ export default function PharmacyDashboard() {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -318,8 +345,8 @@ export default function PharmacyDashboard() {
           </h2>
 
           {completedLoading ? (
-            <div className="flex justify-center py-4">
-              <div className="w-5 h-5 border-4 border-gray-300 border-t-transparent rounded-full animate-spin" />
+            <div className="flex justify-center py-12">
+              <Loader2 className="h-8 w-8 animate-spin text-primary-600" strokeWidth={2} aria-hidden />
             </div>
           ) : completed.length === 0 ? (
             <div className="bg-white rounded-xl shadow-sm p-6 text-center">
@@ -327,11 +354,16 @@ export default function PharmacyDashboard() {
             </div>
           ) : (
             <div className="space-y-3">
-              {completed.map((visit) => (
-                <div key={visit.id} className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-gray-300 opacity-70">
-                  <div className="flex items-start justify-between">
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2 flex-wrap">
+              {completed.map((visit) => {
+                const visitAmount = amountForVisit(visit);
+                return (
+                <div
+                  key={visit.id}
+                  className="rounded-xl border border-gray-200 border-l-4 border-l-gray-400 bg-white p-4 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
                         <h3 className="font-medium text-gray-600">{visit.patientName}</h3>
                         {phoneOnVisit(visit) && (
                           <span className="text-xs text-gray-500">📱 {phoneOnVisit(visit)}</span>
@@ -339,24 +371,29 @@ export default function PharmacyDashboard() {
                         <span className="text-xs text-gray-400">
                           Dispensed {timeAgo(visit.dispensedAt)}
                         </span>
-                        <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200">
+                        <span className="rounded-full border border-green-200 bg-green-100 px-2 py-0.5 text-xs text-green-700">
                           Dispensed
                         </span>
                       </div>
                       {medicinesForVisit(visit).length > 0 && (
                         <ul className="space-y-0.5">
                           {medicinesForVisit(visit).map((med, i) => (
-                            <li key={i} className="text-xs text-gray-500 flex items-start gap-1">
+                            <li key={i} className="flex items-start gap-1 text-xs text-gray-500">
                               <span className="text-gray-400">•</span> {med}
                             </li>
                           ))}
                         </ul>
                       )}
                     </div>
-                    <span className="text-sm text-gray-400 font-medium shrink-0">₹1000</span>
+                    {visitAmount != null && (
+                      <span className="shrink-0 text-sm font-semibold text-gray-700">
+                        {formatAmountInr(visitAmount)}
+                      </span>
+                    )}
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>

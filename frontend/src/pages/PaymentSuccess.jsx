@@ -1,27 +1,24 @@
+import { CheckCircle2 } from 'lucide-react';
+
 export default function PaymentSuccess() {
   return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-      <div className="bg-white rounded-2xl shadow-lg p-10 max-w-md w-full text-center space-y-6">
-        <div className="flex justify-center">
-          <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center">
-            <svg className="w-10 h-10 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
+    <div className="flex min-h-screen items-center justify-center bg-[#f0f4f8] px-4 py-10">
+      <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-10 text-center shadow-sm">
+        <div className="mb-8 flex items-center justify-center gap-2 text-gray-600">
+          <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600" strokeWidth={2} aria-hidden />
+          <span className="text-xs font-semibold tracking-wide text-gray-600">CareOps AI</span>
         </div>
 
         <div>
-          <h1 className="text-3xl font-bold text-gray-800">Payment Successful</h1>
-          <p className="text-gray-500 mt-2 text-sm">Your payment has been received.</p>
+          <h1 className="text-3xl font-bold text-gray-900">Payment Successful</h1>
+          <p className="mt-2 text-sm text-gray-500">Your payment has been received.</p>
         </div>
 
-        <div className="bg-green-50 border border-green-200 rounded-xl px-5 py-4">
-          <p className="text-sm text-green-700 font-medium">
+        <div className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4">
+          <p className="text-sm font-medium text-green-800">
             Thank you for your payment. Please collect your medicines from Counter 2.
           </p>
         </div>
-
-        <p className="text-xs text-gray-400">CareOps AI — Hospital Workflow Automation</p>
       </div>
     </div>
   );

@@ -47,17 +47,27 @@ export default function EmergencyBanner() {
   if (!emergency) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-red-600 text-white px-6">
-      <div className="text-center max-w-xl">
-        <div className="text-5xl mb-4">🚨</div>
-        <h1 className="text-3xl font-bold mb-2">EMERGENCY ALERT</h1>
-        <p className="text-xl font-semibold mb-1">{emergency.patientName}</p>
-        <p className="text-lg mb-6 opacity-90">{emergency.symptoms}</p>
-        <p className="text-base mb-8 opacity-80">Please attend immediately</p>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-red-700/95 px-4 py-8 backdrop-blur-sm"
+      role="alertdialog"
+      aria-modal="true"
+      aria-labelledby="emergency-banner-title"
+    >
+      <div className="w-full max-w-lg rounded-2xl border border-white/20 bg-white p-8 text-center shadow-2xl ring-1 ring-black/5">
+        <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl bg-red-50 text-4xl" aria-hidden>
+          🚨
+        </div>
+        <h1 id="emergency-banner-title" className="text-sm font-bold uppercase tracking-[0.15em] text-red-600">
+          EMERGENCY ALERT
+        </h1>
+        <p className="mt-3 text-2xl font-bold text-gray-900">{emergency.patientName}</p>
+        <p className="mt-3 text-base leading-relaxed text-gray-700">{emergency.symptoms}</p>
+        <p className="mt-5 text-sm font-medium text-gray-500">Please attend immediately</p>
         <button
+          type="button"
           onClick={handleDismiss}
           disabled={dismissing}
-          className="bg-white text-red-600 font-bold px-8 py-3 rounded-xl text-lg hover:bg-red-50 transition disabled:opacity-50 disabled:cursor-not-allowed"
+          className="mt-8 w-full rounded-xl bg-red-600 px-6 py-3.5 text-base font-semibold text-white shadow-sm transition hover:bg-red-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {dismissing ? 'Updating…' : 'Attending Now'}
         </button>

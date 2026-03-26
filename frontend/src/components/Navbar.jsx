@@ -135,10 +135,10 @@ export default function Navbar() {
             to={to}
             className={({ isActive }) =>
               [
-                'flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors',
+                'flex items-center gap-3 rounded-lg border-l-4 px-3 py-2.5 text-sm font-medium transition-colors',
                 isActive
-                  ? 'bg-primary-50 text-primary-600'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900',
+                  ? 'border-primary-600 bg-primary-100 text-primary-700'
+                  : 'border-transparent text-gray-600 hover:bg-gray-50 hover:text-gray-900',
               ].join(' ')
             }
           >
