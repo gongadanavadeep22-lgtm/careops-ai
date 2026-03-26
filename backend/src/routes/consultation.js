@@ -53,11 +53,14 @@ router.post('/soap', verifyToken, async (req, res, next) => {
       suggestedMedicines: Array.isArray(pv.suggestedMedicines) ? pv.suggestedMedicines : [],
     };
     if (!hasAnySoap && !hasRx) {
+      const fromAi = String(pv.message || result.prescriptionValidation?.message || '').trim();
       prescriptionValidation = {
         isCorrect: false,
         status: 'wrong',
         message:
-          'No SOAP or medicines saved. Fix Gemini on Railway (GEMINI_API_KEY, logs), then Generate SOAP again.',
+          fromAi.length > 10
+            ? fromAi
+            : 'No SOAP or medicines returned. In Railway: confirm GEMINI_API_KEY is a Google AI Studio key (starts with AIza), enable Generative Language API, then check logs for [Gemini] errors when you click Generate SOAP.',
         suggestedMedicines: [],
       };
     }
