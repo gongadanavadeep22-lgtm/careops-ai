@@ -133,7 +133,19 @@ export default function Login() {
 
   return (
     <div className="flex min-h-screen w-full justify-center bg-[#f0f4f8] p-3 sm:p-4 md:p-5">
-      <div className="flex w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl lg:min-h-[calc(100vh-40px)] lg:flex-row">
+      <div className="flex w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl lg:min-h-[calc(100vh-40px)]">
+        {/* Logo — full width so it shows on mobile (form column is below the blue panel) */}
+        <div className="flex shrink-0 justify-center border-b border-gray-100 bg-white px-4 py-5 sm:py-6">
+          <img
+            src="/logo-careops.svg"
+            alt="CareOps AI"
+            width={200}
+            height={120}
+            className="h-20 w-auto max-h-[7rem] max-w-[min(100%,220px)] object-contain sm:h-24 sm:max-h-[7.5rem]"
+          />
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col lg:min-h-0 lg:flex-row">
         {/* LEFT — branding & visuals */}
         <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-br from-blue-600 to-blue-800 px-6 py-8 text-white sm:px-10 sm:py-10 lg:overflow-y-auto">
           <div className="flex items-center gap-3">
@@ -310,6 +322,7 @@ export default function Login() {
               </a>
             </p>
           </form>
+        </div>
         </div>
       </div>
     </div>
