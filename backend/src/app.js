@@ -8,12 +8,17 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
-const allowedOrigin = (process.env.ALLOWED_ORIGIN || '').trim().replace(/['"]/g, '');
+// Comma-separated list, e.g. "https://app.vercel.app,https://www.domain.com"
+// If empty, any origin is allowed (reflect) — fine for dev; set explicitly in production.
+const allowedOrigins = (process.env.ALLOWED_ORIGIN || '')
+  .split(',')
+  .map((o) => o.trim().replace(/['"]/g, ''))
+  .filter(Boolean);
 
 const corsOptions = {
-  origin: allowedOrigin || true,
+  origin: allowedOrigins.length ? allowedOrigins : true,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 };
 

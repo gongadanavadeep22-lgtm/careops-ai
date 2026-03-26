@@ -11,6 +11,7 @@ import {
   Shield,
 } from 'lucide-react';
 import { auth } from '../firebase/config';
+import client from '../api/client';
 
 // Passwords: never stored in this app — Firebase Auth hashes credentials server-side (HTTPS).
 // Chrome’s “password found in a data breach” warning is from Google Password Checkup (browser),
@@ -30,6 +31,44 @@ const LOGIN_TEAM_AVATARS = [
   { src: '/avatars/pharmacist.jpg', label: 'Pharmacy' },
 ];
 
+function apiUrlConfigured() {
+  const raw = import.meta.env.VITE_API_URL;
+  return typeof raw === 'string' && raw.trim().length > 0;
+}
+
+/** Maps Firebase, fetch, axios, and network errors to a clear UI message. */
+function loginErrorMessage(err) {
+  const code = err?.code;
+  if (typeof code === 'string' && code.startsWith('auth/')) {
+    const firebaseMessages = {
+      'auth/wrong-password': 'Incorrect password.',
+      'auth/user-not-found': 'No account found for this email.',
+      'auth/invalid-email': 'Invalid email address.',
+      'auth/invalid-credential': 'Invalid email or password.',
+      'auth/too-many-requests': 'Too many attempts. Try again later.',
+      'auth/network-request-failed':
+        'Network error talking to Firebase. Check connection and Firebase config (VITE_FIREBASE_*).',
+    };
+    return firebaseMessages[code] || err.message || 'Sign-in failed.';
+  }
+
+  const status = err?.response?.status;
+  if (status === 404) {
+    return 'Your account is not registered in the system. Contact admin@careops.com.';
+  }
+  if (status === 401) {
+    return 'Could not verify your session with the server. Try again.';
+  }
+  const apiMsg = err?.response?.data?.error;
+  if (typeof apiMsg === 'string' && apiMsg.trim()) return apiMsg;
+
+  const msg = err?.message || '';
+  if (msg === 'Network Error' || msg === 'Failed to fetch') {
+    return 'Cannot reach the CareOps API. Set VITE_API_URL in Vercel to your backend base URL (e.g. https://your-app.up.railway.app) with no trailing slash, redeploy, and ensure the backend is running. If the console shows CORS errors, set ALLOWED_ORIGIN on the backend to your Vercel URL.';
+  }
+  return msg || 'Login failed. Check your credentials.';
+}
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -42,17 +81,21 @@ export default function Login() {
     setError('');
     setLoading(true);
 
+    if (!apiUrlConfigured()) {
+      setError(
+        import.meta.env.PROD
+          ? 'Missing API URL: in Vercel → Settings → Environment Variables, set VITE_API_URL to your backend (e.g. https://xxx.up.railway.app), then redeploy.'
+          : 'Missing VITE_API_URL in frontend/.env (e.g. VITE_API_URL=http://localhost:5000). Restart the dev server after changing it.'
+      );
+      setLoading(false);
+      return;
+    }
+
     try {
-      const credential = await signInWithEmailAndPassword(auth, email, password);
-      const idToken = await credential.user.getIdToken();
+      await signInWithEmailAndPassword(auth, email, password);
 
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${idToken}` },
-      });
+      const { data } = await client.get('/api/auth/me');
 
-      if (!res.ok) throw new Error('Failed to fetch user profile');
-
-      const data = await res.json();
       const rawRole = typeof data.role === 'string' ? data.role.trim().toLowerCase() : '';
       const destination = ROLE_ROUTES[rawRole];
       if (!destination) {
@@ -65,7 +108,18 @@ export default function Login() {
       }
       navigate(destination, { replace: true });
     } catch (err) {
-      setError(err.message || 'Login failed. Check your credentials.');
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.error('[CareOps login]', err);
+      }
+      if (auth.currentUser) {
+        try {
+          await signOut(auth);
+        } catch {
+          /* ignore */
+        }
+      }
+      setError(loginErrorMessage(err));
     } finally {
       setLoading(false);
     }
