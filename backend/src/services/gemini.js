@@ -1,8 +1,11 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+console.log('[Gemini] init — GEMINI_API_KEY set:', Boolean((process.env.GEMINI_API_KEY || '').trim()));
+
 /**
  * Tries several model + API version pairs. Railway: GEMINI_API_KEY (required).
  * Optional: GEMINI_MODEL, GEMINI_API_VERSION=v1beta
+ * Includes gemini-1.5-flash on v1 first (common Google AI Studio default), then fallbacks.
  */
 function modelCandidates() {
   const envModel = process.env.GEMINI_MODEL?.trim();
@@ -13,6 +16,7 @@ function modelCandidates() {
     { model: 'gemini-2.0-flash', apiVersion: 'v1' },
     { model: 'gemini-2.0-flash-001', apiVersion: 'v1' },
     { model: 'gemini-1.5-flash-002', apiVersion: 'v1' },
+    { model: 'gemini-1.5-flash', apiVersion: 'v1' },
     { model: 'gemini-1.5-flash-8b', apiVersion: 'v1' },
     { model: 'gemini-1.5-flash', apiVersion: 'v1beta' },
     { model: 'gemini-pro', apiVersion: 'v1beta' },
@@ -43,7 +47,25 @@ async function generateContentWithFallback(request) {
       console.warn(`[Gemini] fail model=${name} api=${apiVersion}: ${e.message}`);
     }
   }
+  console.error('[Gemini] all models failed — last error:', lastErr);
   throw lastErr || new Error('Gemini: all model attempts failed');
+}
+
+/** Prefer response.text(); fall back to candidate parts (JSON mode sometimes leaves .text() empty). */
+function extractResponseText(result) {
+  if (!result?.response) return '';
+  try {
+    const t = result.response.text();
+    if (typeof t === 'string' && t.trim()) return t;
+  } catch (e) {
+    console.warn('[Gemini] response.text() failed:', e.message);
+  }
+  const parts = result.response.candidates?.[0]?.content?.parts;
+  if (!Array.isArray(parts)) return '';
+  return parts
+    .map((p) => (typeof p?.text === 'string' ? p.text : ''))
+    .join('')
+    .trim();
 }
 
 function extractJsonObject(text) {
@@ -123,20 +145,36 @@ async function generateContentJsonFirst(prompt) {
       temperature: 0.2,
     },
   };
-  try {
-    const result = await generateContentWithFallback(jsonBody);
-    const text = result.response.text();
-    return extractJsonObject(text) ?? extractJsonArray(text);
-  } catch (e) {
-    console.warn('Gemini JSON-mode failed, trying plain text:', e.message);
-    try {
-      const result = await generateContentWithFallback(prompt);
-      const text = result.response.text();
-      return extractJsonObject(text) ?? extractJsonArray(text);
-    } catch (e2) {
-      console.error('Gemini plain text failed:', e2.message);
+
+  async function parseFromPlainTextRequest() {
+    const result = await generateContentWithFallback(prompt);
+    const text = extractResponseText(result);
+    if (!text) {
+      console.warn('[Gemini] plain-text path returned empty body');
       return null;
     }
+    return extractJsonObject(text) ?? extractJsonArray(text);
+  }
+
+  try {
+    const result = await generateContentWithFallback(jsonBody);
+    const text = extractResponseText(result);
+    const parsed = text ? extractJsonObject(text) ?? extractJsonArray(text) : null;
+    if (parsed != null) return parsed;
+    console.warn(
+      '[Gemini] JSON-mode response empty or not parseable; retrying as plain text (same prompt)'
+    );
+  } catch (e) {
+    console.warn('Gemini JSON-mode failed, trying plain text. First error:', e.message);
+    console.error('Gemini JSON-mode error full:', e);
+  }
+
+  try {
+    return await parseFromPlainTextRequest();
+  } catch (e2) {
+    console.error('Gemini plain text failed full:', e2);
+    console.error('Gemini plain text failed message:', e2.message);
+    return null;
   }
 }
 
@@ -160,7 +198,8 @@ Format: {"urgency": "EMERGENCY|PRIORITY|GENERAL", "department": "string", "reaso
     }
     return parsed;
   } catch (error) {
-    console.error('Gemini error:', error.message);
+    console.error('Gemini classifyUrgency error full:', error);
+    console.error('Gemini classifyUrgency message:', error.message);
     return { urgency: 'GENERAL', department: 'General', reason: 'AI unavailable' };
   }
 }
@@ -239,7 +278,8 @@ Format: {"subjective":"string","objective":"string","assessment":"string","plan"
       prescriptionValidation,
     };
   } catch (error) {
-    console.error('Gemini SOAP error:', error.message);
+    console.error('Gemini generateSOAPNote error full:', error);
+    console.error('Gemini generateSOAPNote message:', error.message);
     return empty;
   }
 }
@@ -283,12 +323,14 @@ Format: {"insights":["insight one","insight two","insight three"]}`;
     }
     if (!list || list.length === 0) {
       const result = await generateContentWithFallback(prompt);
-      list = extractJsonArray(result.response.text());
+      const raw = extractResponseText(result);
+      list = extractJsonArray(raw) ?? (extractJsonObject(raw)?.insights ?? null);
     }
     if (!list || list.length === 0) return fallback;
     return list.map(String).filter(Boolean).slice(0, 5);
   } catch (error) {
-    console.error('Gemini panel error:', error.message);
+    console.error('Gemini generateDecisionPanel error full:', error);
+    console.error('Gemini generateDecisionPanel message:', error.message);
     return fallback;
   }
 }

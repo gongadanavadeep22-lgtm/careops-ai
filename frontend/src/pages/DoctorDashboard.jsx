@@ -639,7 +639,11 @@ export default function DoctorDashboard() {
                           </span>
                           <div>
                             <p className="font-semibold">
-                              {prescriptionValidation.isCorrect ? 'Prescription looks correct' : 'Wrong medicine detected'}
+                              {prescriptionValidation.isCorrect
+                                ? 'Prescription looks correct'
+                                : soapReady
+                                  ? 'Wrong medicine detected'
+                                  : 'SOAP not generated'}
                             </p>
                             {prescriptionValidation.message && (
                               <p className="text-xs mt-0.5 opacity-90">{prescriptionValidation.message}</p>
