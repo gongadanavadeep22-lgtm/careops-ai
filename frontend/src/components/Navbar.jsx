@@ -11,6 +11,7 @@ import {
   Heart,
   FileText,
   LogOut,
+  Stethoscope,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 
@@ -20,6 +21,21 @@ const ROLE_BADGE_CLASS = {
   pharmacist: 'bg-purple-100 text-purple-800 border border-purple-200',
   patient: 'bg-gray-100 text-gray-800 border border-gray-200',
   ops: 'bg-yellow-100 text-yellow-800 border border-yellow-200',
+};
+
+/** Default profile photos per role (sidebar). Ops/demo keep letter fallback. */
+const ROLE_AVATAR_SRC = {
+  patient: '/avatars/patient.jpg',
+  nurse: '/avatars/nurse.jpg',
+  doctor: '/avatars/doctor-male.jpg',
+  pharmacist: '/avatars/pharmacist.jpg',
+};
+
+const ROLE_AVATAR_BADGE = {
+  patient: User,
+  nurse: Heart,
+  doctor: Stethoscope,
+  pharmacist: Package,
 };
 
 function navItemsForRole(role) {
@@ -103,11 +119,25 @@ export default function Navbar() {
       {/* Profile */}
       <div className="shrink-0 border-b border-gray-100 px-5 pb-4">
         <div className="flex items-start gap-3">
-          <div
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700"
-            aria-hidden
-          >
-            {avatarLetter(user)}
+          <div className="relative h-10 w-10 shrink-0" aria-hidden>
+            {avatarSrc ? (
+              <>
+                <img
+                  src={avatarSrc}
+                  alt=""
+                  className="h-10 w-10 rounded-full object-cover shadow-sm ring-2 ring-white"
+                />
+                {AvatarBadge && (
+                  <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-primary-600 ring-2 ring-white">
+                    <AvatarBadge className="h-2.5 w-2.5 text-white" strokeWidth={2.5} aria-hidden />
+                  </span>
+                )}
+              </>
+            ) : (
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary-100 text-sm font-semibold text-primary-700">
+                {avatarLetter(user)}
+              </div>
+            )}
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-gray-900">

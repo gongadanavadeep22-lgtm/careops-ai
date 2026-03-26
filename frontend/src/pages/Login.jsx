@@ -20,6 +20,12 @@ const ROLE_ROUTES = {
   patient: '/patient',
 };
 
+const LOGIN_TEAM_AVATARS = [
+  { src: '/avatars/nurse.jpg', label: 'Nurse' },
+  { src: '/avatars/doctor-male.jpg', label: 'Doctor' },
+  { src: '/avatars/pharmacist.jpg', label: 'Pharmacy' },
+];
+
 export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -59,13 +65,10 @@ export default function Login() {
   ];
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-[#f0f4f8] p-8">
-      <div
-        className="flex w-full max-w-6xl min-w-[900px] overflow-hidden rounded-2xl bg-white shadow-xl"
-        style={{ minHeight: '560px' }}
-      >
-        {/* LEFT — branding */}
-        <div className="flex flex-1 flex-col bg-gradient-to-br from-blue-600 to-blue-800 px-10 py-10 text-white">
+    <div className="flex min-h-screen w-full justify-center bg-[#f0f4f8] p-3 sm:p-4 md:p-5">
+      <div className="flex w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl lg:min-h-[calc(100vh-40px)] lg:flex-row">
+        {/* LEFT — branding & visuals */}
+        <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-br from-blue-600 to-blue-800 px-6 py-8 text-white sm:px-10 sm:py-10 lg:overflow-y-auto">
           <div className="flex items-center gap-3">
             <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20">
               <Plus className="h-6 w-6 stroke-[2.5]" aria-hidden />
@@ -73,12 +76,14 @@ export default function Login() {
             <span className="text-xl font-bold tracking-tight">CareOps AI</span>
           </div>
 
-          <h1 className="mt-8 text-3xl font-bold leading-tight">Welcome to CareOps AI</h1>
-          <p className="mt-4 max-w-md text-sm text-blue-100">
+          <h1 className="mt-6 text-2xl font-bold leading-tight sm:mt-8 sm:text-3xl">
+            Welcome to CareOps AI
+          </h1>
+          <p className="mt-3 max-w-lg text-sm text-blue-100">
             AI-Powered Healthcare Management System
           </p>
 
-          <ul className="mt-8 space-y-2">
+          <ul className="mt-6 space-y-2 sm:mt-8">
             {features.map((text) => (
               <li key={text} className="flex items-start gap-2 text-sm text-blue-50">
                 <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/20">
@@ -89,7 +94,7 @@ export default function Login() {
             ))}
           </ul>
 
-          <div className="mt-8 rounded-xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm">
+          <div className="mt-6 rounded-xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm sm:mt-8">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-blue-100">
               Sample AI insights
             </p>
@@ -109,22 +114,58 @@ export default function Login() {
             </div>
           </div>
 
-          <div className="mt-auto flex justify-center pt-8">
-            <img
-              src="/login-illustration.svg"
-              alt=""
-              className="mx-auto h-auto w-full max-w-[320px] opacity-95"
-            />
+          {/* Physicians + team avatars — replaces bottom illustration */}
+          <div className="mt-8 border-t border-white/15 pt-6 lg:mt-auto">
+            <p className="text-center text-xs font-semibold uppercase tracking-wide text-blue-100/90">
+              Your clinical team
+            </p>
+            <div className="mt-4 flex flex-wrap items-end justify-center gap-4 sm:gap-6">
+              <figure className="text-center">
+                <img
+                  src="/avatars/login-doctor-male.jpg"
+                  alt=""
+                  className="mx-auto h-36 w-[7.25rem] rounded-2xl object-cover shadow-lg ring-2 ring-white/30 sm:h-44 sm:w-36"
+                />
+                <figcaption className="mt-2 text-[11px] font-medium text-blue-100/90">
+                  Physician
+                </figcaption>
+              </figure>
+              <figure className="text-center">
+                <img
+                  src="/avatars/login-doctor-female.jpg"
+                  alt=""
+                  className="mx-auto h-36 w-[7.25rem] rounded-2xl object-cover shadow-lg ring-2 ring-white/30 sm:h-44 sm:w-36"
+                />
+                <figcaption className="mt-2 text-[11px] font-medium text-blue-100/90">
+                  Physician
+                </figcaption>
+              </figure>
+            </div>
+
+            <div className="mt-6 flex flex-wrap items-center justify-center gap-5 sm:gap-6">
+              {LOGIN_TEAM_AVATARS.map(({ src, label }) => (
+                <div key={label} className="flex flex-col items-center gap-1.5">
+                  <img
+                    src={src}
+                    alt=""
+                    className="h-12 w-12 rounded-full object-cover ring-2 ring-white/40 shadow-md sm:h-14 sm:w-14"
+                  />
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-blue-100/85">
+                    {label}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
         {/* RIGHT — form */}
-        <div className="flex w-[min(100%,450px)] shrink-0 flex-col justify-center border-l border-gray-100 bg-white px-10 py-12">
+        <div className="flex w-full shrink-0 flex-col justify-center border-t border-gray-100 bg-white px-6 py-10 sm:px-10 lg:w-[min(100%,460px)] lg:border-l lg:border-t-0 lg:py-12 xl:w-[min(100%,480px)]">
           <h2 className="text-2xl font-bold text-gray-900">Sign In</h2>
           <p className="mt-1 text-sm text-gray-500">Use your CareOps account credentials</p>
 
           {error && (
-            <p className="mt-6 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+            <p className="mt-6 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
               {error}
             </p>
           )}
@@ -150,7 +191,7 @@ export default function Login() {
                   onChange={(e) => setEmail(e.target.value)}
                   required
                   autoComplete="email"
-                  className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-10 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                  className="w-full rounded-lg border border-gray-200 bg-slate-50/80 py-2.5 pl-10 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20"
                 />
               </div>
             </div>
@@ -172,7 +213,7 @@ export default function Login() {
                   onChange={(e) => setPassword(e.target.value)}
                   required
                   autoComplete="current-password"
-                  className="w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-10 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
+                  className="w-full rounded-lg border border-gray-200 bg-slate-50/80 py-2.5 pl-10 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20"
                 />
               </div>
             </div>
