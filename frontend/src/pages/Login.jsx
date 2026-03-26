@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { signInWithEmailAndPassword } from 'firebase/auth';
+import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
 import {
   Plus,
@@ -11,6 +11,10 @@ import {
   Shield,
 } from 'lucide-react';
 import { auth } from '../firebase/config';
+
+// Passwords: never stored in this app — Firebase Auth hashes credentials server-side (HTTPS).
+// Chrome’s “password found in a data breach” warning is from Google Password Checkup (browser),
+// comparing your password to known leaked lists; it is not specific to CareOps code.
 
 const ROLE_ROUTES = {
   nurse: '/nurse',
@@ -49,7 +53,16 @@ export default function Login() {
       if (!res.ok) throw new Error('Failed to fetch user profile');
 
       const data = await res.json();
-      const destination = ROLE_ROUTES[data.role] || '/';
+      const rawRole = typeof data.role === 'string' ? data.role.trim().toLowerCase() : '';
+      const destination = ROLE_ROUTES[rawRole];
+      if (!destination) {
+        await signOut(auth);
+        throw new Error('Your account role is not recognized. Contact admin.');
+      }
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.debug('[CareOps login]', { role: rawRole, destination });
+      }
       navigate(destination, { replace: true });
     } catch (err) {
       setError(err.message || 'Login failed. Check your credentials.');

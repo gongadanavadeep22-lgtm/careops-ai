@@ -8,25 +8,43 @@ export default function EmergencyBanner() {
   const [dismissing, setDismissing] = useState(false);
 
   useEffect(() => {
+    if (!import.meta.env.VITE_FIREBASE_DATABASE_URL) {
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn('[CareOps] VITE_FIREBASE_DATABASE_URL is unset; emergency banner disabled.');
+      }
+      return undefined;
+    }
+
     const emergenciesRef = ref(rtdb, 'emergencies');
-    const unsubscribe = onValue(emergenciesRef, (snapshot) => {
-      const data = snapshot.val();
-      if (!data) {
-        setEmergency(null);
-        return;
-      }
+    const unsubscribe = onValue(
+      emergenciesRef,
+      (snapshot) => {
+        const data = snapshot.val();
+        if (!data) {
+          setEmergency(null);
+          return;
+        }
 
-      const active = Object.entries(data)
-        .filter(([, val]) => val.active === true)
-        .sort((a, b) => b[1].timestamp - a[1].timestamp);
+        const active = Object.entries(data)
+          .filter(([, val]) => val.active === true)
+          .sort((a, b) => b[1].timestamp - a[1].timestamp);
 
-      if (active.length > 0) {
-        const [key, val] = active[0];
-        setEmergency({ key, ...val });
-      } else {
+        if (active.length > 0) {
+          const [key, val] = active[0];
+          setEmergency({ key, ...val });
+        } else {
+          setEmergency(null);
+        }
+      },
+      (err) => {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn('[CareOps] Realtime DB emergencies listener:', err?.message || err);
+        }
         setEmergency(null);
       }
-    });
+    );
 
     return () => unsubscribe();
   }, []);

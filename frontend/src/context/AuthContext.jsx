@@ -15,9 +15,30 @@ export function AuthProvider({ children }) {
       if (firebaseUser) {
         try {
           const { data } = await client.get('/api/auth/me');
-          setUser({ uid: data.uid, email: firebaseUser.email, name: data.name, clinicId: data.clinicId });
-          setRole(data.role);
-        } catch {
+          const normalizedRole =
+            typeof data.role === 'string' && data.role.trim()
+              ? data.role.trim().toLowerCase()
+              : null;
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.debug('[CareOps auth]', {
+              path: '/api/auth/me',
+              uid: data.uid,
+              role: normalizedRole,
+            });
+          }
+          setUser({
+            uid: data.uid,
+            email: firebaseUser.email,
+            name: data.name,
+            clinicId: data.clinicId,
+          });
+          setRole(normalizedRole);
+        } catch (err) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn('[CareOps auth] /api/auth/me failed', err?.response?.status, err?.message);
+          }
           setUser(null);
           setRole(null);
         }
@@ -41,5 +62,9 @@ export function AuthProvider({ children }) {
 }
 
 export function useAuth() {
-  return useContext(AuthContext);
+  const ctx = useContext(AuthContext);
+  if (ctx == null) {
+    throw new Error('useAuth must be used within AuthProvider');
+  }
+  return ctx;
 }

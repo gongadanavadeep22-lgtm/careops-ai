@@ -4,6 +4,7 @@ import { db } from '../firebase/config';
 import client from '../api/client';
 import Layout from '../components/Layout';
 import EmergencyBanner from '../components/EmergencyBanner';
+import { normalizeInsights, insightToString, tipToString } from '../utils/clinicalText';
 import {
   Loader2,
   Stethoscope,
@@ -213,7 +214,7 @@ export default function DoctorDashboard() {
         setPrescriptionValidation(hasSoap ? loadedVisit.prescriptionValidation || null : null);
       }
       if (Array.isArray(loadedVisit.decisionPanel) && loadedVisit.decisionPanel.length > 0) {
-        setDecisionPanel(loadedVisit.decisionPanel);
+        setDecisionPanel(normalizeInsights(loadedVisit.decisionPanel));
       }
 
       // Fetch patient only if patientId exists
@@ -253,7 +254,7 @@ export default function DoctorDashboard() {
         ...(consultationTranscript?.trim() ? { transcript: consultationTranscript.trim() } : {}),
       });
       if (reqId !== panelRequestRef.current) return;
-      setDecisionPanel(Array.isArray(data.insights) ? data.insights : []);
+      setDecisionPanel(normalizeInsights(data.insights));
     } catch (err) {
       if (reqId !== panelRequestRef.current) return;
       setPanelError(err.response?.data?.error || 'Failed to generate insights. Click Retry.');
@@ -623,7 +624,7 @@ export default function DoctorDashboard() {
                           <ul className="space-y-1">
                             {healthTips.map((tip, i) => (
                               <li key={i} className="text-sm text-blue-700 flex items-start gap-1">
-                                <span className="shrink-0">{i + 1}.</span> {tip}
+                                <span className="shrink-0">{i + 1}.</span> {tipToString(tip)}
                               </li>
                             ))}
                           </ul>
@@ -772,7 +773,7 @@ export default function DoctorDashboard() {
                           >
                             <div className="flex gap-2">
                               <Icon className="h-4 w-4 shrink-0 text-gray-700 mt-0.5" aria-hidden />
-                              <p className="text-xs text-gray-800 leading-snug">{insight}</p>
+                              <p className="text-xs text-gray-800 leading-snug">{insightToString(insight)}</p>
                             </div>
                           </div>
                         );
@@ -782,7 +783,7 @@ export default function DoctorDashboard() {
                           <p className="text-[10px] font-semibold text-gray-400 uppercase">More</p>
                           {decisionPanel.slice(3).map((insight, i) => (
                             <div key={`extra-${i}`} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                              {insight}
+                              {insightToString(insight)}
                             </div>
                           ))}
                         </div>
