@@ -55,12 +55,20 @@ async function sendWhatsApp(toPhone, message) {
   const client = twilio(sid, token);
   const to = normalizeWhatsAppTo(toPhone);
 
+  // Twilio rejects bodies over 1600 chars (e.g. error 21617); truncate to stay under the limit.
+  const MAX_BODY = 1580;
+  let body = String(message ?? '');
+  if (body.length > MAX_BODY) {
+    console.warn('[Twilio] Message length', body.length, 'exceeds limit; truncating to', MAX_BODY);
+    body = `${body.slice(0, MAX_BODY - 24)}\n… (message truncated)`;
+  }
+
   try {
-    console.log('[Twilio] Sending WhatsApp (to suffix):', String(to).slice(-8));
+    console.log('[Twilio] Sending WhatsApp (to suffix):', String(to).slice(-8), 'body chars:', body.length);
     const result = await client.messages.create({
       from,
       to,
-      body: message,
+      body,
     });
     console.log('[Twilio] WhatsApp sent. SID:', result.sid, 'status:', result.status);
     return { success: true, sid: result.sid, status: result.status };

@@ -46,6 +46,8 @@ export default function PharmacyDashboard() {
   const [phoneLoading, setPhoneLoading] = useState(false);
   const [readyLoading, setReadyLoading] = useState(false);
   const [readyStatus, setReadyStatus] = useState('');
+  /** 'success' | 'warning' — warning when marked ready but WhatsApp did not send */
+  const [readyTone, setReadyTone] = useState('success');
   const [readyError, setReadyError] = useState('');
 
   // ── ACTIVE PRESCRIPTIONS (confirmed) via onSnapshot ──
@@ -98,6 +100,7 @@ export default function PharmacyDashboard() {
     setSelectedVisit(visit);
     setPatientPhone(visit.patientPhone ? String(visit.patientPhone) : '');
     setReadyStatus('');
+    setReadyTone('success');
     setReadyError('');
     setPhoneLoading(true);
 
@@ -120,14 +123,28 @@ export default function PharmacyDashboard() {
     if (!selectedVisit) return;
     setReadyLoading(true);
     setReadyStatus('');
+    setReadyTone('success');
     setReadyError('');
 
     try {
       const { data } = await client.post('/api/pharmacy/ready', { visitId: selectedVisit.id });
-      const msg = data.warning
-        ? `Medicines marked as ready. ${data.warning}`
-        : 'Medicines marked as ready. WhatsApp sent to patient.';
-      setReadyStatus(msg);
+      const sent =
+        data.whatsappSent === true ||
+        (data.whatsappSent == null && !data.warning);
+
+      if (sent && !data.warning) {
+        setReadyTone('success');
+        setReadyStatus('Medicines marked as ready. WhatsApp sent to the patient.');
+      } else if (sent && data.warning) {
+        setReadyTone('success');
+        setReadyStatus(`Medicines marked as ready. ${data.warning}`);
+      } else {
+        setReadyTone('warning');
+        setReadyStatus(
+          data.warning ||
+            'Marked as ready, but WhatsApp was not delivered. Check Railway logs, Twilio sandbox join, and TWILIO_WHATSAPP_FROM.'
+        );
+      }
       setTimeout(() => setSelectedVisit(null), 3000);
     } catch (err) {
       setReadyError(err.response?.data?.error || 'Failed to mark as ready. Please try again.');
@@ -266,8 +283,15 @@ export default function PharmacyDashboard() {
                       )}
 
                       {readyStatus && (
-                        <p className="text-sm text-green-600 bg-green-50 border border-green-200 rounded px-3 py-2 text-center font-medium">
-                          ✅ {readyStatus}
+                        <p
+                          className={
+                            readyTone === 'warning'
+                              ? 'text-sm text-amber-900 bg-amber-50 border border-amber-200 rounded px-3 py-2 text-left font-medium'
+                              : 'text-sm text-green-700 bg-green-50 border border-green-200 rounded px-3 py-2 text-center font-medium'
+                          }
+                        >
+                          {readyTone === 'warning' ? '⚠️ ' : '✅ '}
+                          {readyStatus}
                         </p>
                       )}
                       {readyError && (

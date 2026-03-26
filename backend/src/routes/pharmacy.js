@@ -5,6 +5,27 @@ const { db } = require('../services/firestore');
 const { sendWhatsApp } = require('../services/twilio');
 const { medicinesForVisit } = require('../utils/visitMedicines');
 
+function soapField(v) {
+  if (v == null || v === '') return '—';
+  if (typeof v === 'object') {
+    const s = JSON.stringify(v);
+    return s.length > 400 ? `${s.slice(0, 397)}…` : s;
+  }
+  const s = String(v).trim();
+  return s || '—';
+}
+
+function tipLine(t) {
+  if (t == null) return '';
+  if (typeof t === 'string') return t.trim();
+  if (typeof t === 'object') {
+    const x = t.text ?? t.tip ?? t.title ?? t.message;
+    if (x != null) return String(x).trim();
+    return JSON.stringify(t).slice(0, 200);
+  }
+  return String(t);
+}
+
 // GET /api/pharmacy/queue
 router.get('/queue', verifyToken, async (req, res, next) => {
   try {
@@ -89,45 +110,76 @@ router.post('/ready', verifyToken, async (req, res, next) => {
     const medicines = medicinesForVisit(visit);
     const totalAmount = 1000;
 
-    // Step 5 & 6: Build and send WhatsApp message with SOAP notes
+    // Step 5 & 6: Build and send WhatsApp message with SOAP notes (read visit snapshot from before status update)
     let whatsappWarning = null;
+    let whatsappSent = false;
+    let twilioError = null;
+
     if (patientPhone) {
-      const medicineList = medicines.map((m) => `✅ ${m}`).join('\n');
-      const frontendUrl = (process.env.ALLOWED_ORIGIN || 'https://careops-ai-gamma.vercel.app').trim().replace(/['"]/g, '');
+      const medicineList =
+        medicines.length > 0
+          ? medicines.map((m) => `• ${m}`).join('\n')
+          : '• (See consultation summary below — no separate medicine list on file.)';
+      const patientLabel = visit.patientName ? String(visit.patientName).trim() : 'there';
+      const frontendUrl = (process.env.ALLOWED_ORIGIN || 'https://careops-ai-gamma.vercel.app')
+        .trim()
+        .replace(/['"]/g, '');
 
       const soapNote = visit.soapNote || {};
-      const soapSection =
-        soapNote.subjective || soapNote.objective || soapNote.assessment || soapNote.plan
-          ? `\n📋 *Consultation Summary (SOAP):*\n` +
-            `S: ${soapNote.subjective || '—'}\n` +
-            `O: ${soapNote.objective || '—'}\n` +
-            `A: ${soapNote.assessment || '—'}\n` +
-            `P: ${soapNote.plan || '—'}`
-          : '';
-
-      const healthTips = visit.healthTips || [];
-      const tipsSection = healthTips.length
-        ? `\n\n💡 *Health Tips:*\n${healthTips.map((t) => `• ${t}`).join('\n')}`
+      const hasSoap = [soapNote.subjective, soapNote.objective, soapNote.assessment, soapNote.plan].some(
+        (x) => x != null && String(x).trim() !== ''
+      );
+      const soapSection = hasSoap
+        ? `\n📋 *Consultation (SOAP):*\n` +
+          `S: ${soapField(soapNote.subjective)}\n` +
+          `O: ${soapField(soapNote.objective)}\n` +
+          `A: ${soapField(soapNote.assessment)}\n` +
+          `P: ${soapField(soapNote.plan)}`
         : '';
 
-      const message = `Hello ${visit.patientName}!\nYour medicines are ready and packed. 🎉\n\n💊 *Prescription:*\n${medicineList}\n\n💰 *Total Amount: Rs ${totalAmount}*\n\n💳 Pay here: ${frontendUrl}/payment-success${soapSection}${tipsSection}\n\n📍 Please collect from Counter 2.\nThank you for choosing CareOps AI.`;
+      const healthTipsRaw = Array.isArray(visit.healthTips) ? visit.healthTips : [];
+      const tipsLines = healthTipsRaw.map(tipLine).filter(Boolean);
+      const tipsSection = tipsLines.length
+        ? `\n\n💡 *Health tips:*\n${tipsLines.map((t) => `• ${t}`).join('\n')}`
+        : '';
+
+      const payUrl = `${frontendUrl.replace(/\/$/, '')}/payment-success`;
+      const message =
+        `Hello ${patientLabel}!\nYour medicines are ready. 🎉\n\n` +
+        `💊 *Medicines:*\n${medicineList}\n\n` +
+        `💰 *Total: Rs ${totalAmount}*\n\n` +
+        `💳 *Pay (demo):* ${payUrl}` +
+        `${soapSection}${tipsSection}\n\n` +
+        `📍 Collect from Counter 2.\n— CareOps AI`;
 
       try {
         await sendWhatsApp(patientPhone, message);
+        whatsappSent = true;
       } catch (whatsappErr) {
-        console.error(
-          'WhatsApp send failed:',
-          whatsappErr.message,
-          whatsappErr.code || whatsappErr.status || ''
-        );
+        const code = whatsappErr.code ?? whatsappErr.status;
+        console.error('WhatsApp send failed:', whatsappErr.message, code || '');
+        twilioError = {
+          code: code != null ? String(code) : null,
+          message: String(whatsappErr.message || 'Unknown Twilio error'),
+        };
         whatsappWarning =
-          'Prescription marked as ready but WhatsApp could not be sent. Check Railway logs and Twilio sandbox / FROM number.';
+          'WhatsApp was not delivered. ' +
+          (code != null
+            ? `Twilio error ${code}: ${whatsappErr.message}. `
+            : `${whatsappErr.message}. `) +
+          'If using the sandbox, the patient must join your sandbox first (send the join code to the Twilio WhatsApp number). Check TWILIO_WHATSAPP_FROM and Railway logs [Twilio].';
       }
     } else {
       whatsappWarning = 'Prescription marked as ready. No phone number found for patient.';
     }
 
-    res.json({ success: true, totalAmount, warning: whatsappWarning });
+    res.json({
+      success: true,
+      totalAmount,
+      whatsappSent,
+      warning: whatsappWarning,
+      ...(twilioError && { twilioError }),
+    });
   } catch (err) {
     next(err);
   }
