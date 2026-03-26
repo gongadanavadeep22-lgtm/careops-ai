@@ -134,17 +134,6 @@ export default function Login() {
   return (
     <div className="flex min-h-screen w-full justify-center bg-[#f0f4f8] p-3 sm:p-4 md:p-5">
       <div className="flex w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl lg:min-h-[calc(100vh-40px)]">
-        {/* Logo — full width so it shows on mobile (form column is below the blue panel) */}
-        <div className="flex shrink-0 justify-center border-b border-gray-100 bg-white px-4 py-5 sm:py-6">
-          <img
-            src="/logo-careops.svg"
-            alt="CareOps AI"
-            width={200}
-            height={120}
-            className="h-20 w-auto max-h-[7rem] max-w-[min(100%,220px)] object-contain sm:h-24 sm:max-h-[7.5rem]"
-          />
-        </div>
-
         <div className="flex min-h-0 flex-1 flex-col lg:min-h-0 lg:flex-row">
         {/* LEFT — branding & visuals */}
         <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-br from-blue-600 to-blue-800 px-6 py-8 text-white sm:px-10 sm:py-10 lg:overflow-y-auto">
@@ -239,7 +228,16 @@ export default function Login() {
         </div>
 
         {/* RIGHT — form */}
-        <div className="flex w-full shrink-0 flex-col justify-center border-t border-gray-100 bg-white px-6 py-10 sm:px-10 lg:w-[min(100%,460px)] lg:border-l lg:border-t-0 lg:py-12 xl:w-[min(100%,480px)]">
+        <div className="flex w-full shrink-0 flex-col justify-center border-t border-gray-100 bg-white px-6 py-8 sm:px-10 sm:py-10 lg:w-[min(100%,460px)] lg:border-l lg:border-t-0 lg:py-12 xl:w-[min(100%,480px)]">
+          <div className="mb-6 flex justify-center sm:mb-7">
+            <img
+              src="/logo-careops.svg"
+              alt="CareOps AI"
+              width={220}
+              height={132}
+              className="h-[6.75rem] w-auto max-h-[8.5rem] max-w-[min(100%,15.5rem)] object-contain sm:h-[7.75rem] sm:max-w-[17rem]"
+            />
+          </div>
           <h2 className="text-2xl font-bold text-gray-900">Sign In</h2>
           <p className="mt-1 text-sm text-gray-500">Use your CareOps account credentials</p>
 
