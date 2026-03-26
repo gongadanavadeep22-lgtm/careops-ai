@@ -13,6 +13,7 @@ export default function PatientDashboard() {
     name: '',
     age: '',
     area: '',
+    phone: '',
     symptoms: '',
     allergies: '',
     appointmentDate: '',
@@ -44,6 +45,7 @@ export default function PatientDashboard() {
           name: data.name || '',
           age: data.age || '',
           area: data.area || '',
+          phone: data.phone || '',
           symptoms: data.symptoms || '',
           allergies: data.allergies || '',
           appointmentDate: data.appointmentDate || '',
@@ -86,7 +88,7 @@ export default function PatientDashboard() {
           client.get('/api/patients/profile'),
           client.get('/api/doctors'),
         ]);
-        setProfileReady(!!(profileRes.data?.name));
+        setProfileReady(!!(profileRes.data?.name && String(profileRes.data?.phone || '').trim()));
         setDoctors(doctorsRes.data?.doctors || []);
       } catch {
         setProfileReady(false);
@@ -112,6 +114,10 @@ export default function PatientDashboard() {
     setApptLoading(true);
     try {
       const { data: patient } = await client.get('/api/patients/profile');
+      if (!String(patient.phone || '').trim()) {
+        setApptLoading(false);
+        return setApptError('Add your mobile number under Profile and save, then book again.');
+      }
       const selectedDoctor = doctors.find((d) => d.id === apptForm.doctorId);
 
       await client.post('/api/appointments/book', {
@@ -246,6 +252,21 @@ export default function PatientDashboard() {
                 />
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-gray-600 mb-1">Mobile (WhatsApp)</label>
+                <input
+                  type="tel"
+                  name="phone"
+                  value={form.phone}
+                  onChange={handleChange}
+                  placeholder="10-digit Indian number or +91xxxxxxxxxx — required for pharmacy WhatsApp"
+                  className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  Save your profile with a real number. For Twilio sandbox, that number must join the sandbox first.
+                </p>
+              </div>
+
               <SaveBar status={saveStatus} error={saveError} />
             </div>
           )}
@@ -296,7 +317,7 @@ export default function PatientDashboard() {
               </div>
             ) : !profileReady ? (
               <div className="bg-yellow-50 border border-yellow-200 rounded-lg px-4 py-3 text-sm text-yellow-700">
-                Please save your profile first before booking an appointment.
+                Open <strong>Profile</strong>, enter <strong>name</strong>, <strong>age</strong>, and <strong>mobile (WhatsApp)</strong>, then save. The mobile number is used when the pharmacy sends your “medicines ready” message.
               </div>
             ) : (
               <form onSubmit={handleApptSubmit} className="space-y-4">

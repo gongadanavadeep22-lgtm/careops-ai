@@ -25,9 +25,11 @@ router.get('/profile', verifyToken, async (req, res, next) => {
 
     if (!doc.exists) {
       return res.json({
+        uid: req.user.uid,
         name: '',
         age: '',
         area: '',
+        phone: '',
         symptoms: '',
         allergies: '',
         appointmentDate: '',
@@ -35,7 +37,7 @@ router.get('/profile', verifyToken, async (req, res, next) => {
       });
     }
 
-    res.json(doc.data());
+    res.json({ ...doc.data(), uid: req.user.uid });
   } catch (err) {
     next(err);
   }
@@ -45,7 +47,7 @@ router.get('/profile', verifyToken, async (req, res, next) => {
 router.post('/profile', verifyToken, async (req, res, next) => {
   try {
     const uid = req.user.uid;
-    const { name, age, area, symptoms, allergies, appointmentDate } = req.body;
+    const { name, age, area, phone, symptoms, allergies, appointmentDate } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
@@ -59,6 +61,7 @@ router.post('/profile', verifyToken, async (req, res, next) => {
       name: name.trim(),
       age: Number(age),
       area: (area || '').trim(),
+      phone: String(phone || '').trim().replace(/\s/g, ''),
       symptoms: (symptoms || '').trim(),
       allergies: (allergies || '').trim(),
       appointmentDate: appointmentDate || '',

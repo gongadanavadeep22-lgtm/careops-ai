@@ -27,6 +27,13 @@ function timeAgo(dateStr) {
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
 }
 
+/** Phone stored on visit at check-in or loaded from patient profile in UI */
+function phoneOnVisit(visit) {
+  const p = visit?.patientPhone;
+  if (p != null && String(p).trim()) return String(p).trim();
+  return '';
+}
+
 export default function PharmacyDashboard() {
   const [active, setActive] = useState([]);
   const [completed, setCompleted] = useState([]);
@@ -89,7 +96,7 @@ export default function PharmacyDashboard() {
 
   async function handleSelectVisit(visit) {
     setSelectedVisit(visit);
-    setPatientPhone('');
+    setPatientPhone(visit.patientPhone ? String(visit.patientPhone) : '');
     setReadyStatus('');
     setReadyError('');
     setPhoneLoading(true);
@@ -97,10 +104,14 @@ export default function PharmacyDashboard() {
     if (visit.patientId) {
       try {
         const { data } = await client.get(`/api/patients/by-id?patientId=${visit.patientId}`);
-        setPatientPhone(data.patient?.phone || '');
+        const fromProfile = String(data.patient?.phone || '').trim();
+        const fromVisit = phoneOnVisit(visit);
+        setPatientPhone(fromProfile || fromVisit);
       } catch {
-        setPatientPhone('');
+        setPatientPhone(phoneOnVisit(visit));
       }
+    } else {
+      setPatientPhone(phoneOnVisit(visit));
     }
     setPhoneLoading(false);
   }
@@ -171,6 +182,14 @@ export default function PharmacyDashboard() {
                             {medicinesForVisit(visit).length} medicines
                           </span>
                         </div>
+                        <p className="text-xs text-gray-600 mt-1">
+                          <span className="font-medium text-gray-700">Phone:</span>{' '}
+                          {phoneOnVisit(visit) ? (
+                            <span className="text-gray-800">{phoneOnVisit(visit)}</span>
+                          ) : (
+                            <span className="text-amber-700">Not on file — open card; patient must save mobile in Profile</span>
+                          )}
+                        </p>
                         <p className="text-xs text-gray-500">Click to view details and send WhatsApp</p>
                       </div>
                       <span className="text-blue-500 text-sm font-medium shrink-0">View →</span>
@@ -192,11 +211,18 @@ export default function PharmacyDashboard() {
                           <p className="text-sm font-bold text-gray-800 mt-1">{visit.patientName}</p>
                         </div>
                         <div className="bg-gray-50 rounded-lg p-3">
-                          <p className="text-xs text-gray-500 font-medium uppercase">Phone Number</p>
+                          <p className="text-xs text-gray-500 font-medium uppercase">Phone Number (WhatsApp)</p>
                           {phoneLoading ? (
                             <p className="text-sm text-gray-400 mt-1">Loading…</p>
                           ) : (
-                            <p className="text-sm font-bold text-gray-800 mt-1">{patientPhone || 'Not available'}</p>
+                            <p className="text-sm font-bold text-gray-800 mt-1">
+                              {patientPhone || 'Not available'}
+                            </p>
+                          )}
+                          {!phoneLoading && !patientPhone && (
+                            <p className="text-xs text-amber-700 mt-2">
+                              WhatsApp cannot send until the patient saves a mobile number under Profile.
+                            </p>
                           )}
                         </div>
                       </div>
@@ -228,10 +254,14 @@ export default function PharmacyDashboard() {
                       {!readyStatus && (
                         <button
                           onClick={handleMarkReady}
-                          disabled={readyLoading}
+                          disabled={readyLoading || (!phoneLoading && !patientPhone)}
                           className="w-full bg-green-600 text-white py-3 rounded-xl text-sm font-bold hover:bg-green-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                         >
-                          {readyLoading ? 'Sending…' : '📤 Submit & Send WhatsApp to Patient'}
+                          {readyLoading
+                            ? 'Sending…'
+                            : !patientPhone && !phoneLoading
+                              ? '📵 Add patient phone first'
+                              : '📤 Submit & Send WhatsApp to Patient'}
                         </button>
                       )}
 
@@ -279,8 +309,11 @@ export default function PharmacyDashboard() {
                 <div key={visit.id} className="bg-white rounded-xl shadow-sm p-4 border-l-4 border-gray-300 opacity-70">
                   <div className="flex items-start justify-between">
                     <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-medium text-gray-600">{visit.patientName}</h3>
+                        {phoneOnVisit(visit) && (
+                          <span className="text-xs text-gray-500">📱 {phoneOnVisit(visit)}</span>
+                        )}
                         <span className="text-xs text-gray-400">
                           Dispensed {timeAgo(visit.dispensedAt)}
                         </span>

@@ -29,6 +29,9 @@ router.get('/queue', verifyToken, async (req, res, next) => {
             patientPhone = '';
           }
         }
+        if (!patientPhone && data.patientPhone) {
+          patientPhone = String(data.patientPhone).trim();
+        }
 
         return {
           id: doc.id,
@@ -64,13 +67,16 @@ router.post('/ready', verifyToken, async (req, res, next) => {
     }
     const visit = visitSnap.data();
 
-    // Step 2: Get patient phone
+    // Step 2: Patient phone — Firestore profile first, then snapshot on visit (from check-in / booking)
     let patientPhone = '';
     if (visit.patientId) {
       const patientSnap = await db.collection('patients').doc(visit.patientId).get();
       if (patientSnap.exists) {
         patientPhone = patientSnap.data().phone || '';
       }
+    }
+    if (!patientPhone && visit.patientPhone) {
+      patientPhone = String(visit.patientPhone).trim();
     }
 
     // Step 3: Update visit status

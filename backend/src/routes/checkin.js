@@ -54,6 +54,7 @@ router.post('/', verifyToken, async (req, res, next) => {
       appointmentId,
       patientId: appt.patientId || '',
       patientName: appt.patientName || '',
+      patientPhone: (appt.patientPhone || patient.phone || '').trim().replace(/\s/g, ''),
       doctorId: appt.doctorId || '',
       clinicId: 'clinic-001',
       date: new Date(),
