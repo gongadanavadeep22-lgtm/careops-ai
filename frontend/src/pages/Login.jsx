@@ -229,14 +229,26 @@ export default function Login() {
 
         {/* RIGHT — form */}
         <div className="flex w-full shrink-0 flex-col justify-center border-t border-gray-100 bg-white px-6 py-8 sm:px-10 sm:py-10 lg:w-[min(100%,460px)] lg:border-l lg:border-t-0 lg:py-12 xl:w-[min(100%,480px)]">
-          <div className="mb-6 flex justify-center sm:mb-7">
-            <img
-              src="/logo-careops.png"
-              alt="CareOps AI"
-              width={220}
-              height={220}
-              className="h-[6.75rem] w-auto max-h-[8.5rem] max-w-[min(100%,15.5rem)] object-contain sm:h-[7.75rem] sm:max-w-[17rem]"
-            />
+          <div className="mb-7 flex flex-col items-center sm:mb-8">
+            {/* mix-blend-multiply: softens baked-in white in the PNG on this white panel */}
+            <div className="flex w-full justify-center [isolation:isolate]">
+              <img
+                src="/logo-careops.png"
+                alt=""
+                width={320}
+                height={320}
+                className="h-40 w-auto max-h-[13rem] max-w-[min(100%,22rem)] object-contain mix-blend-multiply sm:h-44 sm:max-h-[15rem] sm:max-w-[24rem]"
+              />
+            </div>
+            <p
+              className="mt-4 text-center text-3xl font-extrabold tracking-tight text-[#1565C0] sm:text-4xl"
+              style={{
+                textShadow:
+                  '0 1px 0 #fff, 0 2px 0 #e3f2fd, 0 4px 8px rgba(21,101,192,0.35), 0 6px 16px rgba(10,102,255,0.15)',
+              }}
+            >
+              CareOps AI
+            </p>
           </div>
           <h2 className="text-2xl font-bold text-gray-900">Sign In</h2>
           <p className="mt-1 text-sm text-gray-500">Use your CareOps account credentials</p>
