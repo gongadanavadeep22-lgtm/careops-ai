@@ -99,6 +99,8 @@ export default function Navbar() {
   }
 
   const badgeClass = ROLE_BADGE_CLASS[role] || 'bg-gray-100 text-gray-700 border border-gray-200';
+  const avatarSrc = role && ROLE_AVATAR_SRC[role] ? ROLE_AVATAR_SRC[role] : null;
+  const AvatarBadge = role && ROLE_AVATAR_BADGE[role] ? ROLE_AVATAR_BADGE[role] : null;
 
   return (
     <aside
