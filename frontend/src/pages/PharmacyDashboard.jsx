@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
-import { db } from '../firebase/config';
+import { getFirestoreDb } from '../firebase/config';
 import client from '../api/client';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -50,7 +51,45 @@ function formatAmountInr(n) {
   return `₹${Number(n).toLocaleString('en-IN')}`;
 }
 
+/** E.164-style digits for wa.me (India demo): 91 + 10-digit mobile, no + or spaces. */
+function phoneDigitsForWaMe(phoneRaw) {
+  const d = String(phoneRaw || '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.length === 10) return `91${d}`;
+  if (d.startsWith('91') && d.length >= 12) return d.slice(0, 12);
+  if (d.startsWith('91')) return d;
+  return d;
+}
+
+function buildPharmacyWhatsAppDeepLinkMessage(t, patientName, medicineNames, billLabel) {
+  const name = (patientName && String(patientName).trim()) || 'there';
+  const meds =
+    Array.isArray(medicineNames) && medicineNames.length > 0
+      ? medicineNames.join(', ')
+      : t('pharmacy.medsFallback');
+  return t('pharmacy.whatsappBody', { name, meds, bill: billLabel });
+}
+
+function openWhatsAppWaMePrefilled(phoneDigits, text) {
+  if (!phoneDigits) return;
+  const url = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(text)}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+/** Queue card / quick demo: uses phone on the visit row only (not patient profile). */
+function openWaMeFromVisit(visit, t) {
+  const digits = phoneDigitsForWaMe(phoneOnVisit(visit));
+  if (!digits) return;
+  const meds = medicinesForVisit(visit);
+  const billN = amountForVisit(visit) ?? 1000;
+  const msg = buildPharmacyWhatsAppDeepLinkMessage(t, visit.patientName, meds, formatAmountInr(billN));
+  openWhatsAppWaMePrefilled(digits, msg);
+}
+
 export default function PharmacyDashboard() {
+  const { t } = useTranslation();
+  const db = getFirestoreDb();
+
   const [active, setActive] = useState([]);
   const [completed, setCompleted] = useState([]);
   const [activeLoading, setActiveLoading] = useState(true);
@@ -135,6 +174,21 @@ export default function PharmacyDashboard() {
     setPhoneLoading(false);
   }
 
+  function openWaMeFromDetailPanel() {
+    if (!selectedVisit) return;
+    const digits = phoneDigitsForWaMe(patientPhone);
+    if (!digits) return;
+    const meds = medicinesForVisit(selectedVisit);
+    const billN = amountForVisit(selectedVisit) ?? 1000;
+    const msg = buildPharmacyWhatsAppDeepLinkMessage(
+      t,
+      selectedVisit.patientName,
+      meds,
+      formatAmountInr(billN)
+    );
+    openWhatsAppWaMePrefilled(digits, msg);
+  }
+
   async function handleMarkReady() {
     if (!selectedVisit) return;
     setReadyLoading(true);
@@ -150,20 +204,34 @@ export default function PharmacyDashboard() {
 
       if (sent && !data.warning) {
         setReadyTone('success');
-        setReadyStatus('Medicines marked as ready. WhatsApp sent to the patient.');
+        setReadyStatus(t('pharmacy.readyOk'));
       } else if (sent && data.warning) {
         setReadyTone('success');
-        setReadyStatus(`Medicines marked as ready. ${data.warning}`);
+        setReadyStatus(t('pharmacy.readyWithWarning', { warning: data.warning }));
       } else {
         setReadyTone('warning');
-        setReadyStatus(
-          data.warning ||
-            'Marked as ready, but WhatsApp was not delivered. Check Railway logs, Twilio sandbox join, and TWILIO_WHATSAPP_FROM.'
-        );
+        setReadyStatus(data.warning || t('pharmacy.readyWarnTwilio'));
       }
+
+      const waDigits = phoneDigitsForWaMe(patientPhone);
+      if (waDigits) {
+        const meds = medicinesForVisit(selectedVisit);
+        const billN =
+          data.totalAmount != null && !Number.isNaN(Number(data.totalAmount))
+            ? Number(data.totalAmount)
+            : amountForVisit(selectedVisit) ?? 1000;
+        const msg = buildPharmacyWhatsAppDeepLinkMessage(
+          t,
+          selectedVisit.patientName,
+          meds,
+          formatAmountInr(billN)
+        );
+        openWhatsAppWaMePrefilled(waDigits, msg);
+      }
+
       setTimeout(() => setSelectedVisit(null), 3000);
     } catch (err) {
-      setReadyError(err.response?.data?.error || 'Failed to mark as ready. Please try again.');
+      setReadyError(err.response?.data?.error || t('pharmacy.markReadyError'));
     } finally {
       setReadyLoading(false);
     }
@@ -173,15 +241,15 @@ export default function PharmacyDashboard() {
     <Layout>
       <div className="max-w-4xl mx-auto px-4 py-8 space-y-10">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Pharmacy Queue</h1>
-          <p className="mt-1 text-sm text-gray-500">Manage prescriptions and patient dispensing</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('pharmacy.title')}</h1>
+          <p className="mt-1 text-sm text-gray-500">{t('pharmacy.subtitle')}</p>
         </div>
 
         {/* ── SECTION 1 — ACTIVE PRESCRIPTIONS ── */}
         <section>
           <h2 className="text-lg font-semibold text-gray-700 mb-3 flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-blue-500 inline-block" />
-            Pending Prescriptions
+            {t('pharmacy.pending')}
             {active.length > 0 && (
               <span className="bg-blue-100 text-blue-700 text-xs px-2 py-0.5 rounded-full font-medium">
                 {active.length}
@@ -193,7 +261,7 @@ export default function PharmacyDashboard() {
             <LoadingSpinner />
           ) : active.length === 0 ? (
             <div className="bg-white rounded-xl shadow-sm p-10 text-center">
-              <p className="text-gray-400 text-sm">All caught up. No pending prescriptions.</p>
+              <p className="text-gray-400 text-sm">{t('pharmacy.noPending')}</p>
             </div>
           ) : (
             <div className="space-y-4">
@@ -201,68 +269,89 @@ export default function PharmacyDashboard() {
                 const visitAmount = amountForVisit(visit);
                 return (
                 <div key={visit.id}>
-                  {/* Prescription Card — click to open detail */}
-                  <button
-                    onClick={() => handleSelectVisit(visit)}
-                    className={`w-full text-left bg-white rounded-xl shadow-sm p-5 border-l-4 border-blue-500 hover:shadow-md transition ${selectedVisit?.id === visit.id ? 'ring-2 ring-blue-400' : ''}`}
+                  <div
+                    className={`flex overflow-hidden rounded-xl border-l-4 border-blue-500 bg-white shadow-sm transition hover:shadow-md ${selectedVisit?.id === visit.id ? 'ring-2 ring-blue-400' : ''}`}
                   >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 space-y-1">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h3 className="font-semibold text-gray-800">{visit.patientName}</h3>
-                          <span className="text-xs text-gray-400">Confirmed {timeAgo(visit.createdAt)}</span>
-                          <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">
-                            {medicinesForVisit(visit).length} medicines
-                          </span>
+                    <button
+                      type="button"
+                      onClick={() => handleSelectVisit(visit)}
+                      className="min-w-0 flex-1 p-5 text-left"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-semibold text-gray-800">{visit.patientName}</h3>
+                            <span className="text-xs text-gray-400">
+                              {t('pharmacy.confirmed')} {timeAgo(visit.createdAt)}
+                            </span>
+                            <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">
+                              {t('pharmacy.medicinesCount', { count: medicinesForVisit(visit).length })}
+                            </span>
+                          </div>
+                          <p className="text-xs text-gray-600 mt-1">
+                            <span className="font-medium text-gray-700">{t('pharmacy.phoneLabel')}</span>{' '}
+                            {phoneOnVisit(visit) ? (
+                              <span className="text-gray-800">{phoneOnVisit(visit)}</span>
+                            ) : (
+                              <span className="text-amber-700">{t('pharmacy.phoneMissing')}</span>
+                            )}
+                          </p>
+                          <p className="text-xs text-gray-500">{t('pharmacy.rowHint')}</p>
                         </div>
-                        <p className="text-xs text-gray-600 mt-1">
-                          <span className="font-medium text-gray-700">Phone:</span>{' '}
-                          {phoneOnVisit(visit) ? (
-                            <span className="text-gray-800">{phoneOnVisit(visit)}</span>
-                          ) : (
-                            <span className="text-amber-700">Not on file — open card; patient must save mobile in Profile</span>
-                          )}
-                        </p>
-                        <p className="text-xs text-gray-500">Click to view details and send WhatsApp</p>
+                        <span className="text-blue-500 text-sm font-medium shrink-0">{t('pharmacy.view')}</span>
                       </div>
-                      <span className="text-blue-500 text-sm font-medium shrink-0">View →</span>
+                    </button>
+                    <div className="flex w-[5.5rem] shrink-0 flex-col justify-center gap-1 border-l border-gray-100 bg-slate-50 px-2 py-3">
+                      <button
+                        type="button"
+                        title={
+                          phoneDigitsForWaMe(phoneOnVisit(visit))
+                            ? t('pharmacy.whatsappTitle')
+                            : t('pharmacy.whatsappDisabledTitle')
+                        }
+                        disabled={!phoneDigitsForWaMe(phoneOnVisit(visit))}
+                        onClick={() => openWaMeFromVisit(visit, t)}
+                        className="rounded-lg bg-[#25D366] px-2 py-2 text-center text-[11px] font-bold leading-tight text-white shadow-sm transition hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
+                      >
+                        {t('pharmacy.whatsapp')}
+                      </button>
                     </div>
-                  </button>
+                  </div>
 
                   {/* Detail Panel — shown when this card is selected */}
                   {selectedVisit?.id === visit.id && (
                     <div className="bg-white rounded-xl shadow-sm p-6 mt-2 border border-blue-200 space-y-4">
                       <div className="flex items-center justify-between">
-                        <h3 className="text-base font-bold text-gray-800">Prescription Details</h3>
-                        <button onClick={() => setSelectedVisit(null)} className="text-gray-400 hover:text-gray-600 text-sm">✕ Close</button>
+                        <h3 className="text-base font-bold text-gray-800">{t('pharmacy.detailsTitle')}</h3>
+                        <button onClick={() => setSelectedVisit(null)} className="text-gray-400 hover:text-gray-600 text-sm">
+                          {t('pharmacy.close')}
+                        </button>
                       </div>
 
                       {/* Patient Info */}
                       <div className="grid grid-cols-2 gap-4">
                         <div className="bg-gray-50 rounded-lg p-3">
-                          <p className="text-xs text-gray-500 font-medium uppercase">Patient Name</p>
+                          <p className="text-xs text-gray-500 font-medium uppercase">{t('pharmacy.patientName')}</p>
                           <p className="text-sm font-bold text-gray-800 mt-1">{visit.patientName}</p>
                         </div>
                         <div className="bg-gray-50 rounded-lg p-3">
-                          <p className="text-xs text-gray-500 font-medium uppercase">Phone Number (WhatsApp)</p>
+                          <p className="text-xs text-gray-500 font-medium uppercase">{t('pharmacy.phoneWhatsapp')}</p>
                           {phoneLoading ? (
-                            <p className="text-sm text-gray-400 mt-1">Loading…</p>
+                            <p className="text-sm text-gray-400 mt-1">{t('pharmacy.loadingPhone')}</p>
                           ) : (
                             <p className="text-sm font-bold text-gray-800 mt-1">
-                              {patientPhone || 'Not available'}
+                              {patientPhone || t('pharmacy.phoneNotAvailable')}
                             </p>
                           )}
                           {!phoneLoading && !patientPhone && (
-                            <p className="text-xs text-amber-700 mt-2">
-                              WhatsApp cannot send until the patient saves a mobile number under Profile.
-                            </p>
+                            <p className="text-xs text-amber-700 mt-2">{t('pharmacy.phoneHelpProfile')}</p>
                           )}
                         </div>
                       </div>
 
                       {/* Medicines */}
                       <div>
-                        <p className="text-xs text-gray-500 font-medium uppercase mb-2">Prescribed Medicines</p>
+                        <p className="text-xs text-gray-500 font-medium uppercase mb-2">{t('pharmacy.prescribedMeds')}</p>
                         {medicinesForVisit(visit).length > 0 ? (
                           <ul className="space-y-2">
                             {medicinesForVisit(visit).map((med, i) => (
@@ -273,20 +362,30 @@ export default function PharmacyDashboard() {
                             ))}
                           </ul>
                         ) : (
-                          <p className="text-sm text-gray-400">No medicines listed</p>
+                          <p className="text-sm text-gray-400">{t('pharmacy.noMeds')}</p>
                         )}
                       </div>
 
                       {/* Total Amount — only when visit has an amount */}
                       {visitAmount != null && (
                         <div className="flex items-center justify-between rounded-lg border border-green-200 bg-green-50 px-4 py-3">
-                          <span className="text-sm font-semibold text-gray-700">Total Amount</span>
+                          <span className="text-sm font-semibold text-gray-700">{t('pharmacy.totalAmount')}</span>
                           <span className="text-xl font-bold text-green-700">{formatAmountInr(visitAmount)}</span>
                         </div>
                       )}
 
                       {/* Mark as Ready */}
                       {!readyStatus && (
+                        <div className="space-y-2">
+                        <button
+                          type="button"
+                          onClick={openWaMeFromDetailPanel}
+                          disabled={phoneLoading || !phoneDigitsForWaMe(patientPhone)}
+                          title={t('pharmacy.openWaTitle')}
+                          className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#25D366] bg-white py-2.5 text-sm font-bold text-[#128C7E] shadow-sm transition hover:bg-green-50 disabled:cursor-not-allowed disabled:border-gray-200 disabled:text-gray-400"
+                        >
+                          {t('pharmacy.openWa')}
+                        </button>
                         <button
                           type="button"
                           onClick={handleMarkReady}
@@ -296,14 +395,15 @@ export default function PharmacyDashboard() {
                           {readyLoading ? (
                             <>
                               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                              Sending…
+                              {t('pharmacy.sending')}
                             </>
                           ) : !patientPhone && !phoneLoading ? (
-                            'Add patient phone first'
+                            t('pharmacy.addPhoneFirst')
                           ) : (
-                            'Mark as Ready'
+                            t('pharmacy.markReady')
                           )}
                         </button>
+                        </div>
                       )}
 
                       {readyStatus && (
@@ -336,7 +436,7 @@ export default function PharmacyDashboard() {
         <section>
           <h2 className="text-lg font-semibold text-gray-500 mb-3 flex items-center gap-2">
             <span className="w-2.5 h-2.5 rounded-full bg-gray-400 inline-block" />
-            Completed
+            {t('pharmacy.completed')}
             {completed.length > 0 && (
               <span className="bg-gray-100 text-gray-500 text-xs px-2 py-0.5 rounded-full font-medium">
                 {completed.length}
@@ -350,7 +450,7 @@ export default function PharmacyDashboard() {
             </div>
           ) : completed.length === 0 ? (
             <div className="bg-white rounded-xl shadow-sm p-6 text-center">
-              <p className="text-gray-300 text-sm">No completed prescriptions yet.</p>
+              <p className="text-gray-300 text-sm">{t('pharmacy.noCompleted')}</p>
             </div>
           ) : (
             <div className="space-y-3">
@@ -369,10 +469,10 @@ export default function PharmacyDashboard() {
                           <span className="text-xs text-gray-500">📱 {phoneOnVisit(visit)}</span>
                         )}
                         <span className="text-xs text-gray-400">
-                          Dispensed {timeAgo(visit.dispensedAt)}
+                          {t('pharmacy.dispensed')} {timeAgo(visit.dispensedAt)}
                         </span>
                         <span className="rounded-full border border-green-200 bg-green-100 px-2 py-0.5 text-xs text-green-700">
-                          Dispensed
+                          {t('pharmacy.dispensed')}
                         </span>
                       </div>
                       {medicinesForVisit(visit).length > 0 && (

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
+import { useTranslation, Trans } from 'react-i18next';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { db } from '../firebase/config';
+import { getFirestoreDb } from '../firebase/config';
 import client from '../api/client';
 import Layout from '../components/Layout';
 import EmergencyBanner from '../components/EmergencyBanner';
@@ -61,7 +62,22 @@ function patientInitial(name) {
   return s ? s[0].toUpperCase() : '?';
 }
 
+/** BCP-47 tag for Web Speech API — match UI language for better recognition. */
+function speechRecognitionLang(i18nLang) {
+  const base = String(i18nLang || 'en').split('-')[0];
+  const map = { en: 'en-US', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN' };
+  return map[base] || 'en-US';
+}
+
+function urgencyLabel(urgency, t) {
+  const u = String(urgency || 'GENERAL').toUpperCase();
+  if (u === 'EMERGENCY') return t('doctor.urgencyEmergency');
+  if (u === 'PRIORITY') return t('doctor.urgencyPriority');
+  return t('doctor.urgencyGeneral');
+}
+
 function WaitTime({ createdAt }) {
+  const { t } = useTranslation();
   const [display, setDisplay] = useState('');
 
   useEffect(() => {
@@ -69,17 +85,20 @@ function WaitTime({ createdAt }) {
       if (!createdAt) return setDisplay('');
       const ts = createdAt?.toDate ? createdAt.toDate() : new Date(createdAt);
       const diffMin = Math.floor((Date.now() - ts.getTime()) / 60000);
-      setDisplay(diffMin < 1 ? 'Just now' : `${diffMin} min ago`);
+      setDisplay(diffMin < 1 ? t('doctor.waitJustNow') : t('doctor.waitMinAgo', { n: diffMin }));
     }
     calc();
     const id = setInterval(calc, 60000);
     return () => clearInterval(id);
-  }, [createdAt]);
+  }, [createdAt, t]);
 
   return <span className="text-xs text-gray-500">{display}</span>;
 }
 
 export default function DoctorDashboard() {
+  const { t, i18n } = useTranslation();
+  const db = getFirestoreDb();
+
   const [queue, setQueue] = useState([]);
   const [queueLoading, setQueueLoading] = useState(true);
 
@@ -97,7 +116,9 @@ export default function DoctorDashboard() {
   const [transcript, setTranscript] = useState('');
   const [recording, setRecording] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [speechError, setSpeechError] = useState('');
   const recognitionRef = useRef(null);
+  const recordingIntentRef = useRef(false);
   const panelRequestRef = useRef(0);
 
   // SOAP
@@ -111,6 +132,8 @@ export default function DoctorDashboard() {
   // Confirm
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmStatus, setConfirmStatus] = useState('');
+  const [confirmOutcome, setConfirmOutcome] = useState(null);
+  const [speechInsecureHint, setSpeechInsecureHint] = useState(false);
 
   // ── LIVE QUEUE via onSnapshot ──
   useEffect(() => {
@@ -147,28 +170,67 @@ export default function DoctorDashboard() {
     setSpeechSupported(!!SR);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const h = window.location.hostname;
+    const localhost = h === 'localhost' || h === '127.0.0.1';
+    setSpeechInsecureHint(!window.isSecureContext && !localhost);
+  }, []);
+
   function startRecording() {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) return;
+    setSpeechError('');
     const recognition = new SR();
     recognition.continuous = true;
     recognition.interimResults = true;
-    recognition.lang = 'en-US';
+    recognition.lang = speechRecognitionLang(i18n.language);
     recognition.onresult = (e) => {
       let full = '';
       for (let i = 0; i < e.results.length; i++) {
-        full += e.results[i][0].transcript + ' ';
+        full += `${e.results[i][0].transcript} `;
       }
       setTranscript(full.trim());
     };
-    recognition.start();
-    recognitionRef.current = recognition;
-    setRecording(true);
+    recognition.onerror = (event) => {
+      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+        setSpeechError(t('doctor.speechDenied'));
+      } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
+        // eslint-disable-next-line no-console
+        console.warn('[speech]', event.error);
+      }
+    };
+    recognition.onend = () => {
+      if (recordingIntentRef.current && recognitionRef.current === recognition) {
+        try {
+          recognition.start();
+        } catch {
+          /* already running or stopped */
+        }
+      }
+    };
+    recordingIntentRef.current = true;
+    try {
+      recognition.start();
+      recognitionRef.current = recognition;
+      setRecording(true);
+    } catch (err) {
+      recordingIntentRef.current = false;
+      recognitionRef.current = null;
+      setRecording(false);
+      // eslint-disable-next-line no-console
+      console.warn('[speech] start failed', err);
+    }
   }
 
   function stopRecording() {
+    recordingIntentRef.current = false;
     if (recognitionRef.current) {
-      recognitionRef.current.stop();
+      try {
+        recognitionRef.current.stop();
+      } catch {
+        /* ignore */
+      }
       recognitionRef.current = null;
     }
     setRecording(false);
@@ -185,6 +247,7 @@ export default function DoctorDashboard() {
     setPrescriptionValidation(null);
     setSoapError('');
     setConfirmStatus('');
+    setConfirmOutcome(null);
     setTranscript('');
     setDecisionPanel([]);
     setCaseError('');
@@ -230,7 +293,7 @@ export default function DoctorDashboard() {
       // Trigger decision panel generation
       triggerPanel(loadedVisit.id);
     } catch {
-      setCaseError('Failed to load patient case. Please try again.');
+      setCaseError(t('doctor.loadCaseError'));
       setPanelLoading(false);
     } finally {
       setCaseLoading(false);
@@ -257,7 +320,7 @@ export default function DoctorDashboard() {
       setDecisionPanel(normalizeInsights(data.insights));
     } catch (err) {
       if (reqId !== panelRequestRef.current) return;
-      setPanelError(err.response?.data?.error || 'Failed to generate insights. Click Retry.');
+      setPanelError(err.response?.data?.error || t('doctor.panelInsightFailed'));
     } finally {
       if (reqId === panelRequestRef.current) setPanelLoading(false);
     }
@@ -269,6 +332,7 @@ export default function DoctorDashboard() {
     setSoapLoading(true);
     setSoapError('');
     setConfirmStatus('');
+    setConfirmOutcome(null);
     try {
       const { data } = await client.post('/api/consultation/soap', {
         visitId: visit.id,
@@ -280,7 +344,7 @@ export default function DoctorDashboard() {
       setPrescriptionValidation(data.prescriptionValidation || null);
       await triggerPanel(visit.id, transcript.trim());
     } catch (err) {
-      setSoapError('Failed to generate SOAP note. Please try again.');
+      setSoapError(t('doctor.soapGenerateFailed'));
     } finally {
       setSoapLoading(false);
     }
@@ -291,16 +355,17 @@ export default function DoctorDashboard() {
     if (!visit?.id) return;
     // Server uses Firestore, not only screen state — must match saved SOAP / prescription
     if (!canApprove) {
-      setConfirmStatus(
-        'Complete Generate SOAP Note with medicines (or plan text) and a passing AI check before sending.'
-      );
+      setConfirmOutcome('error');
+      setConfirmStatus(t('doctor.confirmPrereq'));
       return;
     }
     setConfirmLoading(true);
     setConfirmStatus('');
+    setConfirmOutcome(null);
     try {
       await client.post('/api/prescription/confirm', { visitId: visit.id });
-      setConfirmStatus('Prescription sent to pharmacy successfully.');
+      setConfirmOutcome('success');
+      setConfirmStatus(t('doctor.confirmSuccess'));
       setSelectedAppt(null);
       setVisit(null);
       setPatient(null);
@@ -312,15 +377,12 @@ export default function DoctorDashboard() {
       const bodyErr = err.response?.data?.error || err.response?.data?.message;
       let msg =
         bodyErr ||
-        (status === 401
-          ? 'Session expired — sign out and sign in again.'
-          : null) ||
-        (!err.response
-          ? 'Cannot reach API. Set VITE_API_URL to your Railway URL (Vercel) or run the backend locally.'
-          : null) ||
+        (status === 401 ? t('doctor.errorSessionExpired') : null) ||
+        (!err.response ? t('doctor.errorApiUnreachable') : null) ||
         err.message ||
-        'Failed to confirm. Please try again.';
-      if (status) msg = `${msg} (HTTP ${status})`;
+        t('doctor.errorConfirmFailed');
+      if (status) msg = `${msg}${t('doctor.httpStatus', { status })}`;
+      setConfirmOutcome('error');
       setConfirmStatus(msg);
     } finally {
       setConfirmLoading(false);
@@ -333,8 +395,8 @@ export default function DoctorDashboard() {
 
       <div className="max-w-[1600px] mx-auto px-4 py-6 min-h-0">
         <div className="mb-6">
-          <h1 className="text-2xl font-bold text-gray-900">Doctor Dashboard</h1>
-          <p className="text-gray-500 text-sm mt-1">Live patient queue and consultation management</p>
+          <h1 className="text-2xl font-bold text-gray-900">{t('doctor.title')}</h1>
+          <p className="text-gray-500 text-sm mt-1">{t('doctor.subtitle')}</p>
         </div>
 
         <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-11rem)] max-h-[calc(100vh-8rem)]">
@@ -347,10 +409,10 @@ export default function DoctorDashboard() {
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-medical-green opacity-60" />
                   <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-medical-green" />
                 </span>
-                <h2 className="font-semibold text-gray-900 text-sm">Live Queue</h2>
+                <h2 className="font-semibold text-gray-900 text-sm">{t('doctor.liveQueue')}</h2>
               </div>
               <span className="text-xs font-semibold rounded-full bg-primary-100 text-primary-700 px-2.5 py-0.5">
-                {queueLoading ? '…' : queue.length} waiting
+                {queueLoading ? '…' : t('doctor.waiting', { count: queue.length })}
               </span>
             </div>
 
@@ -360,7 +422,7 @@ export default function DoctorDashboard() {
                   <Loader2 className="h-8 w-8 text-primary-600 animate-spin" aria-hidden />
                 </div>
               ) : queue.length === 0 ? (
-                <p className="text-center text-gray-400 text-sm py-10">No patients waiting</p>
+                <p className="text-center text-gray-400 text-sm py-10">{t('doctor.noPatients')}</p>
               ) : (
                 queue.map((appt) => {
                   const sel = selectedAppt?.id === appt.id;
@@ -381,7 +443,7 @@ export default function DoctorDashboard() {
                           <div className="flex items-start justify-between gap-2">
                             <span className="font-semibold text-gray-900 text-sm truncate">{appt.patientName}</span>
                             <span className={`text-[10px] px-2 py-0.5 rounded-full font-semibold shrink-0 ${urgencyBadgeStyle(appt.urgency)}`}>
-                              {appt.urgency || 'GENERAL'}
+                              {urgencyLabel(appt.urgency, t)}
                             </span>
                           </div>
                           <p className="text-xs text-gray-500 mt-0.5">
@@ -403,7 +465,7 @@ export default function DoctorDashboard() {
           <div className="flex-[4.5] min-w-0 flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/80">
               <h2 className="font-semibold text-gray-900 text-sm">
-                {selectedAppt ? selectedAppt.patientName : 'Patient case'}
+                {selectedAppt ? selectedAppt.patientName : t('doctor.patientCase')}
               </h2>
             </div>
 
@@ -411,8 +473,8 @@ export default function DoctorDashboard() {
               {!selectedAppt ? (
                 <div className="flex flex-col items-center justify-center py-16 text-center px-4">
                   <Stethoscope className="h-14 w-14 text-gray-300 mb-3" strokeWidth={1.25} aria-hidden />
-                  <p className="text-gray-600 font-medium">Select a patient to view their case</p>
-                  <p className="text-xs text-gray-400 mt-1">Choose someone from the live queue</p>
+                  <p className="text-gray-600 font-medium">{t('doctor.selectPatient')}</p>
+                  <p className="text-xs text-gray-400 mt-1">{t('doctor.selectHint')}</p>
                 </div>
               ) : caseLoading ? (
                 <div className="flex justify-center py-16">
@@ -429,18 +491,19 @@ export default function DoctorDashboard() {
                     <div className="flex flex-wrap items-center gap-2 mb-2">
                       <h3 className="text-lg font-bold text-gray-900">{selectedAppt.patientName}</h3>
                       <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${urgencyBadgeStyle(selectedAppt.urgency)}`}>
-                        {selectedAppt.urgency || 'GENERAL'}
+                        {urgencyLabel(selectedAppt.urgency, t)}
                       </span>
                     </div>
                     <p className="text-xs text-gray-500">
-                      Age {patient?.age ?? '—'} · {patient?.area || 'Area not set'} · Dr. {selectedAppt.doctorName || '—'}
+                      {t('doctor.age')} {patient?.age ?? '—'} · {patient?.area || t('doctor.areaNotSet')} · {t('doctor.dr')}{' '}
+                      {selectedAppt.doctorName || '—'}
                     </p>
                   </div>
 
                   <div className="rounded-xl border border-red-100 bg-red-50/80 p-4">
-                    <h4 className="text-sm font-bold text-red-800 mb-2">Allergies</h4>
+                    <h4 className="text-sm font-bold text-red-800 mb-2">{t('doctor.allergies')}</h4>
                     {splitPills(patient?.allergies).length === 0 ? (
-                      <p className="text-xs text-red-700/70">No allergies recorded</p>
+                      <p className="text-xs text-red-700/70">{t('doctor.noAllergies')}</p>
                     ) : (
                       <div className="flex flex-wrap gap-2">
                         {splitPills(patient?.allergies).map((a) => (
@@ -453,7 +516,7 @@ export default function DoctorDashboard() {
                   </div>
 
                   <div className="rounded-xl border border-blue-100 bg-blue-50/80 p-4">
-                    <h4 className="text-sm font-bold text-blue-900 mb-2">Conditions</h4>
+                    <h4 className="text-sm font-bold text-blue-900 mb-2">{t('doctor.conditions')}</h4>
                     {(() => {
                       const raw = patient?.conditions;
                       const list =
@@ -461,7 +524,7 @@ export default function DoctorDashboard() {
                           ? splitPills(raw)
                           : [];
                       return list.length === 0 ? (
-                        <p className="text-xs text-blue-800/70">No conditions recorded</p>
+                        <p className="text-xs text-blue-800/70">{t('doctor.noConditions')}</p>
                       ) : (
                         <div className="flex flex-wrap gap-2">
                           {list.map((c) => (
@@ -480,26 +543,26 @@ export default function DoctorDashboard() {
                   {visit?.vitals && Object.keys(visit.vitals).length > 0 && (
                     <div className="grid grid-cols-3 gap-2">
                       {[
-                        { label: 'Blood pressure', sub: 'BP', value: visit.vitals.bp, Icon: Heart },
-                        { label: 'Temperature', sub: '°F', value: visit.vitals.temperature, Icon: Thermometer },
-                        { label: 'SpO2', sub: '%', value: visit.vitals.spo2, Icon: Activity },
-                      ].map(({ label, sub, value, Icon }) => (
-                        <div key={label} className="rounded-xl border border-gray-100 bg-white p-3 text-center shadow-sm">
+                        { labelKey: 'doctor.bloodPressure', sub: 'BP', value: visit.vitals.bp, Icon: Heart },
+                        { labelKey: 'doctor.temperature', sub: '°F', value: visit.vitals.temperature, Icon: Thermometer },
+                        { labelKey: 'doctor.spo2', sub: '%', value: visit.vitals.spo2, Icon: Activity },
+                      ].map(({ labelKey, sub, value, Icon }) => (
+                        <div key={labelKey} className="rounded-xl border border-gray-100 bg-white p-3 text-center shadow-sm">
                           <Icon className="h-5 w-5 mx-auto text-primary-600 mb-1" aria-hidden />
                           <p className="text-lg font-bold text-gray-900">{value || '—'}</p>
-                          <p className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</p>
+                          <p className="text-[10px] text-gray-500 uppercase tracking-wide">{t(labelKey)}</p>
                         </div>
                       ))}
                     </div>
                   )}
 
                   <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
-                    <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Today&apos;s symptoms</p>
+                    <p className="text-xs font-semibold text-gray-500 uppercase mb-1">{t('doctor.symptomsToday')}</p>
                     <p className="text-sm text-gray-800">{visit?.symptoms || '—'}</p>
                   </div>
 
                   <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
-                    <h3 className="text-sm font-semibold text-gray-900">Consultation Notes</h3>
+                    <h3 className="text-sm font-semibold text-gray-900">{t('doctor.consultationNotes')}</h3>
 
                     {speechSupported ? (
                       <div className="space-y-3 flex flex-col items-center">
@@ -513,11 +576,19 @@ export default function DoctorDashboard() {
                         >
                           <Mic className="h-9 w-9" strokeWidth={2} aria-hidden />
                         </button>
-                        <p className="text-xs font-medium text-gray-600">{recording ? 'Stop Recording' : 'Start Recording'}</p>
+                        <p className="text-xs font-medium text-gray-600">
+                          {recording ? t('doctor.stopRecording') : t('doctor.startRecording')}
+                        </p>
+                        {speechInsecureHint && (
+                          <p className="text-[11px] text-amber-700 text-center max-w-sm">{t('doctor.speechHttps')}</p>
+                        )}
+                        {speechError && (
+                          <p className="text-[11px] text-red-600 text-center max-w-sm">{speechError}</p>
+                        )}
                         <textarea
                           readOnly
                           value={transcript}
-                          placeholder="Live transcript appears here…"
+                          placeholder={t('doctor.transcriptPlaceholder')}
                           rows={5}
                           className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 resize-none min-h-[100px]"
                         />
@@ -526,7 +597,7 @@ export default function DoctorDashboard() {
                       <textarea
                         value={transcript}
                         onChange={(e) => setTranscript(e.target.value)}
-                        placeholder="Type consultation notes here"
+                        placeholder={t('doctor.typeNotesPlaceholder')}
                         rows={5}
                         className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30 resize-none"
                       />
@@ -541,14 +612,14 @@ export default function DoctorDashboard() {
                       {soapLoading ? (
                         <span className="inline-flex items-center justify-center gap-2">
                           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                          Generating…
+                          {t('doctor.generatingSoap')}
                         </span>
                       ) : (
-                        'Generate SOAP Note'
+                        t('doctor.generateSoap')
                       )}
                     </button>
                     <p className="text-[11px] text-gray-500 leading-snug">
-                      After you stop recording, tap <strong>Generate SOAP Note</strong> so Gemini documents the visit, extracts medicines, and runs the safety check. (Manual step avoids running AI on half-finished notes.)
+                      <Trans i18nKey="doctor.generateSoapHint" components={{ strong: <strong /> }} />
                     </p>
 
                     {soapError && (
@@ -562,18 +633,18 @@ export default function DoctorDashboard() {
                   {/* SOAP Note */}
                   {soapNote && (
                     <div className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
-                      <h3 className="text-sm font-semibold text-gray-900">SOAP Note</h3>
+                      <h3 className="text-sm font-semibold text-gray-900">{t('doctor.soapNote')}</h3>
 
                       {['subjective', 'objective', 'assessment', 'plan'].map((key) => (
                         <div key={key}>
-                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{key}</p>
+                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{t(`doctor.${key}`)}</p>
                           <p className="text-sm text-gray-800">{soapNote[key] || '—'}</p>
                         </div>
                       ))}
 
                       {medList.length > 0 && (
                         <div>
-                          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Prescription</p>
+                          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">{t('doctor.prescription')}</p>
                           <div className="flex flex-wrap gap-2">
                             {medList.map((med, i) => (
                               <span
@@ -600,17 +671,17 @@ export default function DoctorDashboard() {
                           <div>
                             <p className="font-semibold">
                               {prescriptionValidation.isCorrect
-                                ? 'Prescription looks correct'
+                                ? t('doctor.rxLooksCorrect')
                                 : soapReady
-                                  ? 'Wrong medicine detected'
-                                  : 'SOAP not generated'}
+                                  ? t('doctor.rxWrongDetected')
+                                  : t('doctor.rxSoapNotGenerated')}
                             </p>
                             {prescriptionValidation.message && (
                               <p className="text-xs mt-0.5 opacity-90">{prescriptionValidation.message}</p>
                             )}
                             {!prescriptionValidation.isCorrect && prescriptionValidation.suggestedMedicines?.length > 0 && (
                               <p className="text-xs mt-1 font-semibold">
-                                Suggested: {prescriptionValidation.suggestedMedicines.join(', ')}
+                                {t('doctor.suggested')} {prescriptionValidation.suggestedMedicines.join(', ')}
                               </p>
                             )}
                           </div>
@@ -620,7 +691,9 @@ export default function DoctorDashboard() {
                       {/* Health Tips */}
                       {healthTips.length > 0 && (
                         <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                          <p className="text-xs font-semibold text-blue-600 uppercase mb-1">💡 Health Tips for Patient</p>
+                          <p className="text-xs font-semibold text-blue-600 uppercase mb-1">
+                            💡 {t('doctor.healthTipsTitle')}
+                          </p>
                           <ul className="space-y-1">
                             {healthTips.map((tip, i) => (
                               <li key={i} className="text-sm text-blue-700 flex items-start gap-1">
@@ -634,17 +707,17 @@ export default function DoctorDashboard() {
                       {/* Approve — SOAP filled + medicines + AI validation must pass */}
                       {!soapReady && (
                         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                          SOAP sections must be filled (run Generate SOAP Note after your notes are complete).
+                          {t('doctor.soapMustFill')}
                         </p>
                       )}
                       {soapReady && medList.length === 0 && (
                         <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                          Add medicines in the transcript and generate SOAP again, or ensure the Plan section lists medications.
+                          {t('doctor.addMedsHint')}
                         </p>
                       )}
                       {soapReady && medList.length > 0 && prescriptionValidation && !prescriptionValidation.isCorrect && (
                         <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
-                          AI flagged a prescription concern — fix the plan or medicines, then generate SOAP again. Approve stays off until the check passes.
+                          {t('doctor.aiFlaggedHint')}
                         </p>
                       )}
                       <button
@@ -660,22 +733,26 @@ export default function DoctorDashboard() {
                         {confirmLoading ? (
                           <span className="inline-flex items-center gap-2">
                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                            Sending…
+                            {t('doctor.confirmSending')}
                           </span>
                         ) : canApprove ? (
-                          'Confirm and Send to Pharmacy'
+                          t('doctor.confirmSend')
                         ) : (
-                          'Confirm and Send to Pharmacy — locked'
+                          t('doctor.confirmLocked')
                         )}
                       </button>
                       {!canApprove && !confirmLoading && (
                         <p className="text-[11px] text-gray-500 text-center mt-1">
-                          There is no separate Confirm button. This turns <strong>green</strong> after SOAP is filled, medicines are listed, and the AI check passes.
+                          <Trans i18nKey="doctor.confirmHint" components={{ strong: <strong /> }} />
                         </p>
                       )}
 
                       {confirmStatus && (
-                        <p className={`text-xs text-center ${confirmStatus.includes('successfully') ? 'text-green-600' : 'text-red-600'}`}>
+                        <p
+                          className={`text-xs text-center ${
+                            confirmOutcome === 'success' ? 'text-green-600' : 'text-red-600'
+                          }`}
+                        >
                           {confirmStatus}
                         </p>
                       )}
@@ -690,12 +767,12 @@ export default function DoctorDashboard() {
           <div className="flex-[2.5] min-w-0 flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
             <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/80">
               <Sparkles className="h-4 w-4 text-primary-600 shrink-0" aria-hidden />
-              <h2 className="font-semibold text-gray-900 text-sm">AI Decision Panel</h2>
+              <h2 className="font-semibold text-gray-900 text-sm">{t('doctor.aiPanel')}</h2>
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 min-h-0">
               {!selectedAppt ? (
-                <p className="text-center text-gray-400 text-xs pt-6">Select a patient to view insights</p>
+                <p className="text-center text-gray-400 text-xs pt-6">{t('doctor.selectForInsights')}</p>
               ) : (
                 <>
                   {soapReady && prescriptionValidation && (
@@ -707,25 +784,23 @@ export default function DoctorDashboard() {
                       }`}
                     >
                       <p className="font-bold text-xs uppercase tracking-wide mb-1">
-                        {prescriptionValidation.isCorrect ? 'Prescription check — OK' : 'Prescription check — review'}
+                        {prescriptionValidation.isCorrect ? t('doctor.rxCheckOk') : t('doctor.rxCheckReview')}
                       </p>
                       {!prescriptionValidation.isCorrect && (
                         <>
-                          <p className="font-semibold">Possible issue with medicines vs diagnosis / symptoms</p>
+                          <p className="font-semibold">{t('doctor.possibleMedIssue')}</p>
                           {prescriptionValidation.message && (
                             <p className="text-xs mt-1.5 leading-relaxed">{prescriptionValidation.message}</p>
                           )}
                           {prescriptionValidation.suggestedMedicines?.length > 0 && (
                             <p className="text-xs mt-2 font-medium">
-                              Suggested alternatives: {prescriptionValidation.suggestedMedicines.join(', ')}
+                              {t('doctor.suggestedAlternatives')} {prescriptionValidation.suggestedMedicines.join(', ')}
                             </p>
                           )}
                         </>
                       )}
                       {prescriptionValidation.isCorrect && (
-                        <p className="text-xs mt-0.5">
-                          AI cross-checked listed medicines against the SOAP note — no conflict flagged. You can approve when ready.
-                        </p>
+                        <p className="text-xs mt-0.5">{t('doctor.aiCrosscheckOk')}</p>
                       )}
                     </div>
                   )}
@@ -733,7 +808,7 @@ export default function DoctorDashboard() {
                   {panelLoading ? (
                     <div className="flex flex-col items-center pt-6 gap-3">
                       <Loader2 className="h-6 w-6 text-primary-600 animate-spin" aria-hidden />
-                      <p className="text-xs text-gray-500">Generating insights</p>
+                      <p className="text-xs text-gray-500">{t('doctor.generatingInsights')}</p>
                     </div>
                   ) : panelError ? (
                     <div className="flex flex-col items-center pt-4 gap-3 px-2">
@@ -743,18 +818,18 @@ export default function DoctorDashboard() {
                         onClick={() => visit?.id && triggerPanel(visit.id, transcript)}
                         className="rounded-lg border border-primary-600 bg-white px-4 py-2 text-xs font-semibold text-primary-600 hover:bg-primary-50 transition"
                       >
-                        Retry
+                        {t('doctor.retry')}
                       </button>
                     </div>
                   ) : decisionPanel.length === 0 ? (
                     <div className="flex flex-col items-center pt-4 gap-3 px-2">
-                      <p className="text-xs text-gray-400 text-center">No clinical insights yet.</p>
+                      <p className="text-xs text-gray-400 text-center">{t('doctor.noInsightsYet')}</p>
                       <button
                         type="button"
                         onClick={() => visit?.id && triggerPanel(visit.id, transcript)}
                         className="rounded-lg bg-primary-600 px-4 py-2 text-xs font-semibold text-white hover:bg-primary-700 transition"
                       >
-                        Generate insights
+                        {t('doctor.generateInsights')}
                       </button>
                     </div>
                   ) : (
@@ -780,7 +855,7 @@ export default function DoctorDashboard() {
                       })}
                       {decisionPanel.length > 3 && (
                         <div className="space-y-2 pt-1 border-t border-gray-100">
-                          <p className="text-[10px] font-semibold text-gray-400 uppercase">More</p>
+                          <p className="text-[10px] font-semibold text-gray-400 uppercase">{t('doctor.more')}</p>
                           {decisionPanel.slice(3).map((insight, i) => (
                             <div key={`extra-${i}`} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
                               {insightToString(insight)}

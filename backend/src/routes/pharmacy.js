@@ -4,6 +4,7 @@ const verifyToken = require('../middleware/verifyToken');
 const { db } = require('../services/firestore');
 const { sendWhatsApp } = require('../services/twilio');
 const { medicinesForVisit } = require('../utils/visitMedicines');
+const { agentDebug } = require('../utils/agentDebug');
 
 function soapField(v) {
   if (v == null || v === '') return '—';
@@ -24,6 +25,16 @@ function tipLine(t) {
     return JSON.stringify(t).slice(0, 200);
   }
   return String(t);
+}
+
+/** Single public app URL for links in WhatsApp (not comma-separated CORS list). */
+function patientFacingAppUrl() {
+  const explicit = (process.env.FRONTEND_PUBLIC_URL || '').trim().replace(/['"]/g, '');
+  if (explicit) return explicit.replace(/\/$/, '');
+  const raw = (process.env.ALLOWED_ORIGIN || 'https://careops-ai-gamma.vercel.app').trim();
+  const first = raw.split(',')[0].trim().replace(/['"]/g, '');
+  const base = first || 'https://careops-ai-gamma.vercel.app';
+  return base.replace(/\/$/, '');
 }
 
 // GET /api/pharmacy/queue
@@ -100,6 +111,19 @@ router.post('/ready', verifyToken, async (req, res, next) => {
       patientPhone = String(visit.patientPhone).trim();
     }
 
+    // #region agent log
+    agentDebug({
+      location: 'pharmacy.js:ready',
+      message: 'patient_phone_resolved',
+      data: {
+        visitId: String(visitId),
+        hasPhone: !!(patientPhone && String(patientPhone).trim()),
+        phoneLen: patientPhone ? String(patientPhone).trim().length : 0,
+      },
+      hypothesisId: 'H3',
+    });
+    // #endregion
+
     // Step 3: Update visit status
     await db.collection('visits').doc(visitId).update({
       prescriptionStatus: 'dispensed',
@@ -121,9 +145,7 @@ router.post('/ready', verifyToken, async (req, res, next) => {
           ? medicines.map((m) => `• ${m}`).join('\n')
           : '• (See consultation summary below — no separate medicine list on file.)';
       const patientLabel = visit.patientName ? String(visit.patientName).trim() : 'there';
-      const frontendUrl = (process.env.ALLOWED_ORIGIN || 'https://careops-ai-gamma.vercel.app')
-        .trim()
-        .replace(/['"]/g, '');
+      const frontendUrl = patientFacingAppUrl();
 
       const soapNote = visit.soapNote || {};
       const hasSoap = [soapNote.subjective, soapNote.objective, soapNote.assessment, soapNote.plan].some(
@@ -170,6 +192,14 @@ router.post('/ready', verifyToken, async (req, res, next) => {
           'If using the sandbox, the patient must join your sandbox first (send the join code to the Twilio WhatsApp number). Check TWILIO_WHATSAPP_FROM and Railway logs [Twilio].';
       }
     } else {
+      // #region agent log
+      agentDebug({
+        location: 'pharmacy.js:ready',
+        message: 'skip_twilio_no_phone',
+        data: { visitId: String(visitId) },
+        hypothesisId: 'H3',
+      });
+      // #endregion
       whatsappWarning = 'Prescription marked as ready. No phone number found for patient.';
     }
 

@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Home,
   Calendar,
@@ -14,6 +15,7 @@ import {
   Stethoscope,
 } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
+import LanguageSwitcher from './LanguageSwitcher';
 
 const ROLE_BADGE_CLASS = {
   nurse: 'bg-blue-100 text-blue-800 border border-blue-200',
@@ -42,41 +44,41 @@ function navItemsForRole(role) {
   switch (role) {
     case 'nurse':
       return [
-        { to: '/nurse', label: 'Dashboard', Icon: Home },
-        { to: '/patients/waiting', label: 'Appointments', Icon: Calendar },
-        { to: '/patients/register', label: 'Patients', Icon: Users },
-        { to: '/appointments/book', label: 'Book Appointment', Icon: Plus },
+        { to: '/nurse', labelKey: 'navItems.dashboard', Icon: Home },
+        { to: '/patients/waiting', labelKey: 'navItems.appointments', Icon: Calendar },
+        { to: '/patients/register', labelKey: 'navItems.patients', Icon: Users },
+        { to: '/appointments/book', labelKey: 'navItems.bookAppointment', Icon: Plus },
       ];
     case 'doctor':
       return [
-        { to: '/doctor', label: 'Dashboard', Icon: Home },
-        { to: '/patients/waiting', label: 'Appointments', Icon: Calendar },
-        { to: '/patients/register', label: 'Patients', Icon: Users },
-        { to: '/pharmacy', label: 'Pharmacy', Icon: Package },
+        { to: '/doctor', labelKey: 'navItems.dashboard', Icon: Home },
+        { to: '/patients/waiting', labelKey: 'navItems.appointments', Icon: Calendar },
+        { to: '/patients/register', labelKey: 'navItems.patients', Icon: Users },
+        { to: '/pharmacy', labelKey: 'navItems.pharmacy', Icon: Package },
       ];
     case 'pharmacist':
       return [
-        { to: '/pharmacy', label: 'Dashboard', Icon: Home },
-        { to: '/pharmacy', label: 'Queue', Icon: List },
-        { to: '/pharmacy', label: 'Completed', Icon: CheckCircle },
+        { to: '/pharmacy', labelKey: 'navItems.dashboard', Icon: Home },
+        { to: '/pharmacy', labelKey: 'navItems.queue', Icon: List },
+        { to: '/pharmacy', labelKey: 'navItems.completed', Icon: CheckCircle },
       ];
     case 'patient':
       return [
-        { to: '/patient', label: 'Dashboard', Icon: Home },
-        { to: '/patient', label: 'Profile', Icon: User },
-        { to: '/patient', label: 'Symptoms', Icon: Heart },
-        { to: '/patient', label: 'Appointments', Icon: Calendar },
-        { to: '/patient', label: 'Lab Reports', Icon: FileText },
+        { to: '/patient', labelKey: 'navItems.dashboard', Icon: Home },
+        { to: '/patient', labelKey: 'navItems.profile', Icon: User },
+        { to: '/patient', labelKey: 'navItems.symptoms', Icon: Heart },
+        { to: '/patient', labelKey: 'navItems.appointments', Icon: Calendar },
+        { to: '/patient', labelKey: 'navItems.labReports', Icon: FileText },
       ];
     case 'ops':
       return [
-        { to: '/ops', label: 'Dashboard', Icon: Home },
-        { to: '/patients/waiting', label: 'Appointments', Icon: Calendar },
-        { to: '/patients/register', label: 'Patients', Icon: Users },
-        { to: '/appointments/book', label: 'Book Appointment', Icon: Plus },
+        { to: '/ops', labelKey: 'navItems.dashboard', Icon: Home },
+        { to: '/patients/waiting', labelKey: 'navItems.appointments', Icon: Calendar },
+        { to: '/patients/register', labelKey: 'navItems.patients', Icon: Users },
+        { to: '/appointments/book', labelKey: 'navItems.bookAppointment', Icon: Plus },
       ];
     default:
-      return [{ to: '/demo', label: 'Dashboard', Icon: Home }];
+      return [{ to: '/demo', labelKey: 'navItems.dashboard', Icon: Home }];
   }
 }
 
@@ -89,9 +91,11 @@ function avatarLetter(user) {
 }
 
 export default function Navbar() {
+  const { t } = useTranslation();
   const { user, role, logout } = useAuth();
   const navigate = useNavigate();
   const items = navItemsForRole(role);
+  const roleLabel = role && t(`role.${role}`, { defaultValue: role });
 
   async function handleLogout() {
     await logout();
@@ -115,7 +119,7 @@ export default function Navbar() {
           </span>
           <span className="text-lg font-bold text-gray-900">CareOps AI</span>
         </div>
-        <p className="pl-[44px] text-xs text-gray-500">AI-Powered Healthcare</p>
+        <p className="pl-[44px] text-xs text-gray-500">{t('nav.tagline')}</p>
       </div>
 
       {/* Profile */}
@@ -143,7 +147,7 @@ export default function Navbar() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-gray-900">
-              {user?.name?.trim() || user?.email || 'User'}
+              {user?.name?.trim() || user?.email || t('role.user')}
             </p>
             {user?.email && (
               <p className="truncate text-xs text-gray-500">{user.email}</p>
@@ -152,7 +156,7 @@ export default function Navbar() {
               <span
                 className={`mt-1.5 inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${badgeClass}`}
               >
-                {role}
+                {roleLabel}
               </span>
             )}
           </div>
@@ -161,9 +165,9 @@ export default function Navbar() {
 
       {/* Nav */}
       <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-4">
-        {items.map(({ to, label, Icon }) => (
+        {items.map(({ to, labelKey, Icon }) => (
           <NavLink
-            key={`${to}-${label}`}
+            key={`${to}-${labelKey}`}
             to={to}
             className={({ isActive }) =>
               [
@@ -175,20 +179,21 @@ export default function Navbar() {
             }
           >
             <Icon className="h-5 w-5 shrink-0 opacity-90" strokeWidth={2} aria-hidden />
-            {label}
+            {t(labelKey)}
           </NavLink>
         ))}
       </nav>
 
       {/* Logout */}
-      <div className="shrink-0 border-t border-gray-100 p-4">
+      <div className="shrink-0 border-t border-gray-100 p-4 space-y-3">
+        <LanguageSwitcher />
         <button
           type="button"
           onClick={handleLogout}
           className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium text-red-600 transition-colors hover:bg-red-50"
         >
           <LogOut className="h-5 w-5 shrink-0" strokeWidth={2} aria-hidden />
-          Logout
+          {t('nav.logout')}
         </button>
       </div>
     </aside>

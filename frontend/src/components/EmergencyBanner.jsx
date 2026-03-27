@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { ref, onValue } from 'firebase/database';
-import { rtdb } from '../firebase/config';
+import { getRtdb, isFirebaseConfigured } from '../firebase/config';
 import client from '../api/client';
 
 export default function EmergencyBanner() {
@@ -8,13 +8,19 @@ export default function EmergencyBanner() {
   const [dismissing, setDismissing] = useState(false);
 
   useEffect(() => {
-    if (!import.meta.env.VITE_FIREBASE_DATABASE_URL) {
+    const dbUrl = (import.meta.env.VITE_FIREBASE_DATABASE_URL || '').trim();
+    if (!dbUrl) {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.warn('[CareOps] VITE_FIREBASE_DATABASE_URL is unset; emergency banner disabled.');
       }
       return undefined;
     }
+
+    if (!isFirebaseConfigured()) return undefined;
+
+    const rtdb = getRtdb();
+    if (!rtdb) return undefined;
 
     const emergenciesRef = ref(rtdb, 'emergencies');
     const unsubscribe = onValue(

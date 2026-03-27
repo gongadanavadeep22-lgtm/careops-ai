@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   Plus,
   Check,
@@ -10,8 +11,13 @@ import {
   BarChart3,
   Shield,
 } from 'lucide-react';
-import { auth } from '../firebase/config';
+import {
+  getFirebaseAuth,
+  getMissingFirebaseEnvVars,
+  isFirebaseConfigured,
+} from '../firebase/config';
 import client from '../api/client';
+import LanguageSwitcher from '../components/LanguageSwitcher';
 
 // Passwords: never stored in this app — Firebase Auth hashes credentials server-side (HTTPS).
 // Chrome’s “password found in a data breach” warning is from Google Password Checkup (browser),
@@ -26,9 +32,9 @@ const ROLE_ROUTES = {
 };
 
 const LOGIN_TEAM_AVATARS = [
-  { src: '/avatars/nurse.jpg', label: 'Nurse' },
-  { src: '/avatars/doctor-male.jpg', label: 'Doctor' },
-  { src: '/avatars/pharmacist.jpg', label: 'Pharmacy' },
+  { src: '/avatars/nurse.jpg', labelKey: 'team.nurse' },
+  { src: '/avatars/doctor-male.jpg', labelKey: 'team.doctor' },
+  { src: '/avatars/pharmacist.jpg', labelKey: 'team.pharmacy' },
 ];
 
 function apiUrlConfigured() {
@@ -36,40 +42,44 @@ function apiUrlConfigured() {
   return typeof raw === 'string' && raw.trim().length > 0;
 }
 
+function firebaseConfigErrorMessage(t) {
+  const missing = getMissingFirebaseEnvVars();
+  const list = missing.length ? missing.join(', ') : 'VITE_FIREBASE_*';
+  if (import.meta.env.PROD) {
+    return t('login.errorFirebaseProd', { list });
+  }
+  return t('login.errorFirebaseDev', { list });
+}
+
 /** Maps Firebase, fetch, axios, and network errors to a clear UI message. */
-function loginErrorMessage(err) {
+function loginErrorMessage(err, t) {
   const code = err?.code;
   if (typeof code === 'string' && code.startsWith('auth/')) {
-    const firebaseMessages = {
-      'auth/wrong-password': 'Incorrect password.',
-      'auth/user-not-found': 'No account found for this email.',
-      'auth/invalid-email': 'Invalid email address.',
-      'auth/invalid-credential': 'Invalid email or password.',
-      'auth/too-many-requests': 'Too many attempts. Try again later.',
-      'auth/network-request-failed':
-        'Network error talking to Firebase. Check connection and Firebase config (VITE_FIREBASE_*).',
-    };
-    return firebaseMessages[code] || err.message || 'Sign-in failed.';
+    const key = `login.${code.replace(/\//g, '_').replace(/-/g, '_')}`;
+    const translated = t(key, { defaultValue: '' });
+    if (translated && translated !== key) return translated;
+    return err.message || t('login.auth_generic');
   }
 
   const status = err?.response?.status;
   if (status === 404) {
-    return 'Your account is not registered in the system. Contact admin@careops.com.';
+    return t('login.errorAccount404');
   }
   if (status === 401) {
-    return 'Could not verify your session with the server. Try again.';
+    return t('login.error401');
   }
   const apiMsg = err?.response?.data?.error;
   if (typeof apiMsg === 'string' && apiMsg.trim()) return apiMsg;
 
   const msg = err?.message || '';
   if (msg === 'Network Error' || msg === 'Failed to fetch') {
-    return 'Cannot reach the CareOps API. Set VITE_API_URL in Vercel to your backend base URL (e.g. https://your-app.up.railway.app) with no trailing slash, redeploy, and ensure the backend is running. If the console shows CORS errors, set ALLOWED_ORIGIN on the backend to your Vercel URL.';
+    return t('login.errorNetwork');
   }
-  return msg || 'Login failed. Check your credentials.';
+  return msg || t('login.errorLoginGeneric');
 }
 
 export default function Login() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -83,24 +93,28 @@ export default function Login() {
 
     if (!apiUrlConfigured()) {
       setError(
-        import.meta.env.PROD
-          ? 'Missing API URL: in Vercel → Settings → Environment Variables, set VITE_API_URL to your backend (e.g. https://xxx.up.railway.app), then redeploy.'
-          : 'Missing VITE_API_URL in frontend/.env (e.g. VITE_API_URL=http://localhost:5000). Restart the dev server after changing it.'
+        import.meta.env.PROD ? t('login.errorApiUrlProd') : t('login.errorApiUrlDev')
       );
       setLoading(false);
       return;
     }
 
+    if (!isFirebaseConfigured()) {
+      setError(firebaseConfigErrorMessage(t));
+      setLoading(false);
+      return;
+    }
+
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
 
       const { data } = await client.get('/api/auth/me');
 
       const rawRole = typeof data.role === 'string' ? data.role.trim().toLowerCase() : '';
       const destination = ROLE_ROUTES[rawRole];
       if (!destination) {
-        await signOut(auth);
-        throw new Error('Your account role is not recognized. Contact admin.');
+        await signOut(getFirebaseAuth());
+        throw new Error(t('login.errorRoleUnknown'));
       }
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -112,24 +126,20 @@ export default function Login() {
         // eslint-disable-next-line no-console
         console.error('[CareOps login]', err);
       }
-      if (auth.currentUser) {
+      if (getFirebaseAuth().currentUser) {
         try {
-          await signOut(auth);
+          await signOut(getFirebaseAuth());
         } catch {
           /* ignore */
         }
       }
-      setError(loginErrorMessage(err));
+      setError(loginErrorMessage(err, t));
     } finally {
       setLoading(false);
     }
   }
 
-  const features = [
-    'Streamline patient management',
-    'Automate appointment scheduling',
-    'Enhance care with AI-powered insights',
-  ];
+  const features = [t('login.feature1'), t('login.feature2'), t('login.feature3')];
 
   return (
     <div className="flex min-h-screen w-full justify-center bg-[#f0f4f8] p-3 sm:p-4 md:p-5">
@@ -145,10 +155,10 @@ export default function Login() {
           </div>
 
           <h1 className="mt-6 text-2xl font-bold leading-tight sm:mt-8 sm:text-3xl">
-            Welcome to CareOps AI
+            {t('login.welcomeTitle')}
           </h1>
           <p className="mt-3 max-w-lg text-sm text-blue-100">
-            AI-Powered Healthcare Management System
+            {t('login.subtitle')}
           </p>
 
           <ul className="mt-6 space-y-2 sm:mt-8">
@@ -164,20 +174,20 @@ export default function Login() {
 
           <div className="mt-6 rounded-xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm sm:mt-8">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-blue-100">
-              Sample AI insights
+              {t('login.sampleInsights')}
             </p>
             <div className="space-y-3 text-sm">
               <div className="flex gap-2 rounded-lg bg-white/5 p-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" aria-hidden />
-                <span className="text-white/95">SpO2 at 92% is below safe level</span>
+                <span className="text-white/95">{t('login.insightSpo2')}</span>
               </div>
               <div className="flex gap-2 rounded-lg bg-white/5 p-2">
                 <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden />
-                <span className="text-white/95">BP has been high in last 2 visits</span>
+                <span className="text-white/95">{t('login.insightBp')}</span>
               </div>
               <div className="flex gap-2 rounded-lg bg-white/5 p-2">
                 <Shield className="mt-0.5 h-4 w-4 shrink-0 text-red-300" aria-hidden />
-                <span className="text-white/95">Patient allergic to Penicillin</span>
+                <span className="text-white/95">{t('login.insightAllergy')}</span>
               </div>
             </div>
           </div>
@@ -185,7 +195,7 @@ export default function Login() {
           {/* Physicians + team avatars — replaces bottom illustration */}
           <div className="mt-8 border-t border-white/15 pt-6 lg:mt-auto">
             <p className="text-center text-xs font-semibold uppercase tracking-wide text-blue-100/90">
-              Your clinical team
+              {t('login.clinicalTeam')}
             </p>
             <div className="mt-4 flex flex-wrap items-end justify-center gap-4 sm:gap-6">
               <figure className="text-center">
@@ -195,7 +205,7 @@ export default function Login() {
                   className="mx-auto h-36 w-[7.25rem] rounded-2xl object-cover shadow-lg ring-2 ring-white/30 sm:h-44 sm:w-36"
                 />
                 <figcaption className="mt-2 text-[11px] font-medium text-blue-100/90">
-                  Physician
+                  {t('login.physician')}
                 </figcaption>
               </figure>
               <figure className="text-center">
@@ -205,21 +215,21 @@ export default function Login() {
                   className="mx-auto h-36 w-[7.25rem] rounded-2xl object-cover shadow-lg ring-2 ring-white/30 sm:h-44 sm:w-36"
                 />
                 <figcaption className="mt-2 text-[11px] font-medium text-blue-100/90">
-                  Physician
+                  {t('login.physician')}
                 </figcaption>
               </figure>
             </div>
 
             <div className="mt-6 flex flex-wrap items-center justify-center gap-5 sm:gap-6">
-              {LOGIN_TEAM_AVATARS.map(({ src, label }) => (
-                <div key={label} className="flex flex-col items-center gap-1.5">
+              {LOGIN_TEAM_AVATARS.map(({ src, labelKey }) => (
+                <div key={labelKey} className="flex flex-col items-center gap-1.5">
                   <img
                     src={src}
                     alt=""
                     className="h-12 w-12 rounded-full object-cover ring-2 ring-white/40 shadow-md sm:h-14 sm:w-14"
                   />
                   <span className="text-[10px] font-medium uppercase tracking-wide text-blue-100/85">
-                    {label}
+                    {t(labelKey)}
                   </span>
                 </div>
               ))}
@@ -229,6 +239,9 @@ export default function Login() {
 
         {/* RIGHT — form */}
         <div className="flex w-full shrink-0 flex-col justify-start border-t border-gray-100 bg-white px-6 pb-8 pt-5 sm:px-10 sm:pb-10 sm:pt-6 lg:w-[min(100%,460px)] lg:border-l lg:border-t-0 lg:pb-12 lg:pt-8 xl:w-[min(100%,480px)]">
+          <div className="mb-4 w-full max-w-sm">
+            <LanguageSwitcher />
+          </div>
           <div className="mb-6 flex flex-col items-center sm:mb-7">
             {/* mix-blend-multiply: softens baked-in white in the PNG on this white panel */}
             <div className="flex w-full justify-center [isolation:isolate]">
@@ -250,8 +263,8 @@ export default function Login() {
               CareOps AI
             </p>
           </div>
-          <h2 className="text-2xl font-bold text-gray-900">Sign In</h2>
-          <p className="mt-1 text-sm text-gray-500">Use your CareOps account credentials</p>
+          <h2 className="text-2xl font-bold text-gray-900">{t('login.signIn')}</h2>
+          <p className="mt-1 text-sm text-gray-500">{t('login.credentialsHint')}</p>
 
           {error && (
             <p className="mt-6 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
@@ -275,7 +288,7 @@ export default function Login() {
                 <input
                   id="login-email"
                   type="email"
-                  placeholder="Enter your email"
+                  placeholder={t('login.emailPlaceholder')}
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
@@ -297,7 +310,7 @@ export default function Login() {
                 <input
                   id="login-password"
                   type="password"
-                  placeholder="Enter your password"
+                  placeholder={t('login.passwordPlaceholder')}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
@@ -312,18 +325,18 @@ export default function Login() {
               disabled={loading}
               className="mt-2 w-full rounded-lg bg-primary-600 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? t('login.signingIn') : t('login.signIn')}
             </button>
 
             <button
               type="button"
               className="text-center text-sm text-primary-600 hover:underline"
             >
-              Forgot password?
+              {t('login.forgotPassword')}
             </button>
 
             <p className="text-center text-xs text-gray-500">
-              Having trouble? Contact{' '}
+              {t('login.troublePrefix')}{' '}
               <a
                 href="mailto:admin@careops.com"
                 className="font-medium text-primary-600 hover:underline"

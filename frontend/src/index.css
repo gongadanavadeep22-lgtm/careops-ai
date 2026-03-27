@@ -9,7 +9,8 @@
 
 /* Base typography — CareOps design foundation (PROMPT 1) */
 * {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Inter', 'Noto Sans', 'Noto Sans Devanagari', 'Noto Sans Telugu', 'Noto Sans Tamil',
+    system-ui, sans-serif;
 }
 
 body {
