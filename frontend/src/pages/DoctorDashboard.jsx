@@ -137,6 +137,14 @@ export default function DoctorDashboard() {
   const [confirmStatus, setConfirmStatus] = useState('');
   const [confirmOutcome, setConfirmOutcome] = useState(null);
   const [speechInsecureHint, setSpeechInsecureHint] = useState(false);
+  const [aiConfigured, setAiConfigured] = useState(true);
+
+  useEffect(() => {
+    client
+      .get('/health')
+      .then(({ data }) => setAiConfigured(Boolean(data.geminiKeySet)))
+      .catch(() => setAiConfigured(false));
+  }, []);
 
   // ── LIVE QUEUE via onSnapshot ──
   useEffect(() => {
@@ -199,9 +207,12 @@ export default function DoctorDashboard() {
     recognition.onerror = (event) => {
       if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
         setSpeechError(t('doctor.speechDenied'));
+      } else if (event.error === 'network') {
+        setSpeechError(t('doctor.speechNetwork'));
+      } else if (event.error === 'audio-capture') {
+        setSpeechError(t('doctor.speechNoMic'));
       } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
-        // eslint-disable-next-line no-console
-        console.warn('[speech]', event.error);
+        setSpeechError(t('doctor.speechGeneric', { code: event.error }));
       }
     };
     recognition.onend = () => {
@@ -397,6 +408,13 @@ export default function DoctorDashboard() {
     <Layout>
       <EmergencyBanner />
 
+      {!aiConfigured && (
+        <div className="mx-4 mt-4 max-w-[1600px] lg:mx-auto rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <strong>Gemini AI is not configured.</strong> Add <code className="text-xs bg-amber-100 px-1 rounded">GEMINI_API_KEY</code> in
+          Railway variables, redeploy, then use Generate SOAP Note. You can still type consultation notes below.
+        </div>
+      )}
+
       <div className="max-w-[1600px] mx-auto px-4 py-6 min-h-0">
         <div className="mb-6">
           <h1 className="text-2xl font-bold text-gray-900">{t('doctor.title')}</h1>
@@ -589,12 +607,15 @@ export default function DoctorDashboard() {
                         {speechError && (
                           <p className="text-[11px] text-red-600 text-center max-w-sm">{speechError}</p>
                         )}
+                        <p className="text-[11px] text-gray-500 text-center max-w-sm">
+                          {t('doctor.speechTypeFallback')}
+                        </p>
                         <textarea
-                          readOnly
                           value={transcript}
+                          onChange={(e) => setTranscript(e.target.value)}
                           placeholder={t('doctor.transcriptPlaceholder')}
                           rows={5}
-                          className="w-full rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-800 resize-none min-h-[100px]"
+                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 resize-none min-h-[100px] focus:outline-none focus:ring-2 focus:ring-primary-500/30"
                         />
                       </div>
                     ) : (

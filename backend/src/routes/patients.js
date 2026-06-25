@@ -121,6 +121,40 @@ router.post('/lab-reports', verifyToken, ...authRoles('patient'), upload.single(
   }
 });
 
+// GET /api/patients/list — registered patient profiles for staff booking
+router.get('/list', verifyToken, ...authRoles('nurse', 'ops', 'doctor'), async (req, res, next) => {
+  try {
+    const q = String(req.query.q || '')
+      .trim()
+      .toLowerCase();
+    const snap = await db.collection('patients').limit(200).get();
+    let patients = snap.docs.map((doc) => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        uid: data.uid || doc.id,
+        name: data.name || '',
+        phone: data.phone || '',
+        area: data.area || '',
+        symptoms: data.symptoms || '',
+        age: data.age ?? '',
+      };
+    });
+    if (q) {
+      patients = patients.filter(
+        (p) =>
+          p.name.toLowerCase().includes(q) ||
+          p.phone.includes(q) ||
+          p.area.toLowerCase().includes(q)
+      );
+    }
+    patients.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    res.json({ patients: patients.slice(0, 50) });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/patients/by-id?patientId=
 router.get('/by-id', verifyToken, ...authRoles('doctor', 'nurse', 'pharmacist', 'ops'), async (req, res, next) => {
   try {

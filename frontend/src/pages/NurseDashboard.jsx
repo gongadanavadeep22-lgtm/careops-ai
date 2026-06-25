@@ -5,6 +5,7 @@ import client from '../api/client';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ErrorMessage from '../components/ErrorMessage';
+import BookAppointmentForm from '../components/BookAppointmentForm';
 
 const VIEWS = ['Upcoming Appointments', 'Book Appointment'];
 
@@ -25,21 +26,6 @@ export default function NurseDashboard() {
   const [vitalsLoading, setVitalsLoading] = useState({});
   const [vitalsStatus, setVitalsStatus] = useState({});
   const [vitalsError, setVitalsError] = useState({});
-
-  // ── BOOK APPOINTMENT STATE ──
-  const [doctors, setDoctors] = useState([]);
-  const [doctorsLoading, setDoctorsLoading] = useState(false);
-  const [bookForm, setBookForm] = useState({
-    patientName: '',
-    patientPhone: '',
-    patientArea: '',
-    doctorId: '',
-    scheduledAt: '',
-    symptoms: '',
-  });
-  const [bookLoading, setBookLoading] = useState(false);
-  const [bookStatus, setBookStatus] = useState('');
-  const [bookError, setBookError] = useState('');
 
   async function loadTodayAppointments() {
     setApptLoading(true);
@@ -63,15 +49,6 @@ export default function NurseDashboard() {
   useEffect(() => {
     loadTodayAppointments();
   }, []);
-
-  useEffect(() => {
-    if (activeView !== 'Book Appointment') return;
-    setDoctorsLoading(true);
-    client.get('/api/doctors')
-      .then(({ data }) => setDoctors(data.doctors || []))
-      .catch(() => setDoctors([]))
-      .finally(() => setDoctorsLoading(false));
-  }, [activeView]);
 
   async function handleCheckIn(appt) {
     setCheckinLoading((prev) => ({ ...prev, [appt.id]: true }));
@@ -124,37 +101,6 @@ export default function NurseDashboard() {
       setVitalsError((prev) => ({ ...prev, [apptId]: 'Failed to save vitals. Try again.' }));
     } finally {
       setVitalsLoading((prev) => ({ ...prev, [apptId]: false }));
-    }
-  }
-
-  async function handleBookSubmit(e) {
-    e.preventDefault();
-    setBookStatus('');
-    setBookError('');
-    setBookLoading(true);
-
-    const selectedDoctor = doctors.find((d) => d.id === bookForm.doctorId);
-
-    try {
-      await client.post('/api/appointments/book', {
-        patientId: '',
-        patientName: bookForm.patientName.trim(),
-        patientPhone: bookForm.patientPhone.trim(),
-        patientArea: bookForm.patientArea.trim(),
-        doctorId: selectedDoctor?.uid || bookForm.doctorId,
-        doctorName: selectedDoctor?.name || '',
-        scheduledAt: bookForm.scheduledAt,
-        symptoms: bookForm.symptoms.trim(),
-      });
-
-      setBookStatus('Appointment booked.');
-      setBookForm({ patientName: '', patientPhone: '', patientArea: '', doctorId: '', scheduledAt: '', symptoms: '' });
-      setActiveView('Upcoming Appointments');
-      loadTodayAppointments();
-    } catch (err) {
-      setBookError(err.response?.data?.error || 'Booking failed. Please try again.');
-    } finally {
-      setBookLoading(false);
     }
   }
 
@@ -443,105 +389,12 @@ export default function NurseDashboard() {
         {activeView === 'Book Appointment' && (
           <div className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm">
             <h2 className="text-lg font-semibold text-gray-900 mb-6">Book Appointment for Patient</h2>
-
-            {doctorsLoading ? (
-              <div className="flex justify-center py-6">
-                <div className="w-6 h-6 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
-              </div>
-            ) : (
-              <form onSubmit={handleBookSubmit} className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Patient Name *</label>
-                    <input
-                      type="text"
-                      required
-                      value={bookForm.patientName}
-                      onChange={(e) => setBookForm((p) => ({ ...p, patientName: e.target.value }))}
-                      placeholder="Full name"
-                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Patient Phone</label>
-                    <input
-                      type="text"
-                      value={bookForm.patientPhone}
-                      onChange={(e) => setBookForm((p) => ({ ...p, patientPhone: e.target.value }))}
-                      placeholder="+91 9876543210"
-                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Patient Area</label>
-                    <input
-                      type="text"
-                      value={bookForm.patientArea}
-                      onChange={(e) => setBookForm((p) => ({ ...p, patientArea: e.target.value }))}
-                      placeholder="e.g. Koramangala"
-                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-600 mb-1">Select Doctor *</label>
-                    <select
-                      required
-                      value={bookForm.doctorId}
-                      onChange={(e) => setBookForm((p) => ({ ...p, doctorId: e.target.value }))}
-                      className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                    >
-                      <option value="">-- Select a doctor --</option>
-                      {doctors.map((doc) => (
-                        <option key={doc.id} value={doc.id}>{doc.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Date &amp; Time *</label>
-                  <input
-                    type="datetime-local"
-                    required
-                    value={bookForm.scheduledAt}
-                    min={new Date().toISOString().slice(0, 16)}
-                    onChange={(e) => setBookForm((p) => ({ ...p, scheduledAt: e.target.value }))}
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-600 mb-1">Symptoms *</label>
-                  <textarea
-                    required
-                    rows={3}
-                    value={bookForm.symptoms}
-                    onChange={(e) => setBookForm((p) => ({ ...p, symptoms: e.target.value }))}
-                    placeholder="Describe patient symptoms"
-                    className="w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
-                  />
-                </div>
-
-                {bookStatus && (
-                  <p className="text-sm text-green-600 bg-green-50 border border-green-200 rounded px-3 py-2">
-                    {bookStatus}
-                  </p>
-                )}
-                {bookError && (
-                  <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
-                    {bookError}
-                  </p>
-                )}
-
-                <button
-                  type="submit"
-                  disabled={bookLoading}
-                  className="w-full rounded-lg bg-primary-600 py-3 text-sm font-semibold text-white shadow-sm hover:bg-primary-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {bookLoading ? 'Booking…' : 'Book Appointment'}
-                </button>
-              </form>
-            )}
+            <BookAppointmentForm
+              onSuccess={() => {
+                setActiveView('Upcoming Appointments');
+                loadTodayAppointments();
+              }}
+            />
           </div>
         )}
       </div>
