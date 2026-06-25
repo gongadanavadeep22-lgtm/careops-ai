@@ -1,11 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const verifyToken = require('../middleware/verifyToken');
+const { authRoles, getClinicId } = require('../middleware/requireRole');
 const { db, rtdb } = require('../services/firestore');
 const { classifyUrgency } = require('../services/gemini');
 
 // POST /api/checkin
-router.post('/', verifyToken, async (req, res, next) => {
+router.post('/', verifyToken, ...authRoles('nurse', 'ops'), async (req, res, next) => {
   try {
     const { appointmentId } = req.body;
 
@@ -13,7 +14,7 @@ router.post('/', verifyToken, async (req, res, next) => {
       return res.status(400).json({ error: 'appointmentId is required' });
     }
 
-    // Step 1: Fetch appointment
+    const clinicId = getClinicId(req);
     const apptRef = db.collection('appointments').doc(appointmentId);
     const apptSnap = await apptRef.get();
 
@@ -23,7 +24,6 @@ router.post('/', verifyToken, async (req, res, next) => {
 
     const appt = apptSnap.data();
 
-    // Step 2: Fetch patient document
     let patient = {};
     if (appt.patientId) {
       const patientSnap = await db.collection('patients').doc(appt.patientId).get();
@@ -32,7 +32,6 @@ router.post('/', verifyToken, async (req, res, next) => {
       }
     }
 
-    // Step 3: Run Gemini triage
     const triageResult = await classifyUrgency({
       symptoms: appt.symptoms || '',
       age: patient.age || '',
@@ -42,21 +41,19 @@ router.post('/', verifyToken, async (req, res, next) => {
 
     const { urgency, department, reason } = triageResult;
 
-    // Step 4: Update appointment — status: arrived, set urgency and department
     await apptRef.update({
       status: 'arrived',
       urgency,
       department,
     });
 
-    // Step 5: Create visit document
     const visitData = {
       appointmentId,
       patientId: appt.patientId || '',
       patientName: appt.patientName || '',
       patientPhone: (appt.patientPhone || patient.phone || '').trim().replace(/\s/g, ''),
       doctorId: appt.doctorId || '',
-      clinicId: 'clinic-001',
+      clinicId,
       date: new Date(),
       symptoms: appt.symptoms || '',
       urgency,
@@ -73,7 +70,6 @@ router.post('/', verifyToken, async (req, res, next) => {
 
     const visitRef = await db.collection('visits').add(visitData);
 
-    // Step 6: Write to Realtime Database if EMERGENCY
     if (urgency === 'EMERGENCY' && rtdb) {
       await rtdb.ref('emergencies').push({
         patientName: appt.patientName || '',
@@ -81,7 +77,7 @@ router.post('/', verifyToken, async (req, res, next) => {
         urgency: 'EMERGENCY',
         timestamp: Date.now(),
         active: true,
-        clinicId: 'clinic-001',
+        clinicId,
       });
     }
 

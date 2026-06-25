@@ -1,5 +1,4 @@
 const twilio = require('twilio');
-const { agentDebug } = require('../utils/agentDebug');
 
 const _sid = (process.env.TWILIO_ACCOUNT_SID || '').trim();
 const _token = (process.env.TWILIO_AUTH_TOKEN || '').trim();
@@ -34,7 +33,6 @@ function normalizeWhatsAppTo(toPhone) {
   }
   const digits = s.replace(/\D/g, '');
   if (!digits) throw new Error('Patient phone has no digits');
-  // 10-digit numbers treated as India; otherwise add + prefix (e.g. 91xxxxxxxxxx)
   if (digits.length === 10) {
     return `whatsapp:+91${digits}`;
   }
@@ -47,57 +45,15 @@ async function sendWhatsApp(toPhone, message) {
   const from = normalizeWhatsAppFrom(process.env.TWILIO_WHATSAPP_FROM);
 
   if (!sid || !token) {
-    // #region agent log
-    agentDebug({
-      location: 'twilio.js:sendWhatsApp',
-      message: 'missing_credentials',
-      data: { hasSid: !!sid, hasToken: !!token, hasFrom: !!from },
-      hypothesisId: 'H1',
-    });
-    // #endregion
     throw new Error('TWILIO_ACCOUNT_SID or TWILIO_AUTH_TOKEN missing');
   }
   if (!from) {
-    // #region agent log
-    agentDebug({
-      location: 'twilio.js:sendWhatsApp',
-      message: 'missing_whatsapp_from',
-      data: { hasFrom: false },
-      hypothesisId: 'H1',
-    });
-    // #endregion
     throw new Error('TWILIO_WHATSAPP_FROM missing (use e.g. whatsapp:+14155238886)');
   }
 
   const client = twilio(sid, token);
-  let to;
-  try {
-    to = normalizeWhatsAppTo(toPhone);
-  } catch (normErr) {
-    // #region agent log
-    agentDebug({
-      location: 'twilio.js:normalizeWhatsAppTo',
-      message: 'normalize_failed',
-      data: { err: String(normErr.message || normErr).slice(0, 120) },
-      hypothesisId: 'H4',
-    });
-    // #endregion
-    throw normErr;
-  }
-  // #region agent log
-  agentDebug({
-    location: 'twilio.js:sendWhatsApp',
-    message: 'pre_create',
-    data: {
-      fromPrefix: String(from).slice(0, 18),
-      toPrefix: String(to).slice(0, 18),
-      bodyLen: String(message ?? '').length,
-    },
-    hypothesisId: 'H2',
-  });
-  // #endregion
+  const to = normalizeWhatsAppTo(toPhone);
 
-  // Twilio rejects bodies over 1600 chars (e.g. error 21617); truncate to stay under the limit.
   const MAX_BODY = 1580;
   let body = String(message ?? '');
   if (body.length > MAX_BODY) {
@@ -107,36 +63,11 @@ async function sendWhatsApp(toPhone, message) {
 
   try {
     console.log('[Twilio] Sending WhatsApp (to suffix):', String(to).slice(-8), 'body chars:', body.length);
-    const result = await client.messages.create({
-      from,
-      to,
-      body,
-    });
+    const result = await client.messages.create({ from, to, body });
     console.log('[Twilio] WhatsApp sent. SID:', result.sid, 'status:', result.status);
-    // #region agent log
-    agentDebug({
-      location: 'twilio.js:sendWhatsApp',
-      message: 'twilio_ok',
-      data: { sid: result.sid, status: result.status },
-      hypothesisId: 'H2',
-    });
-    // #endregion
     return { success: true, sid: result.sid, status: result.status };
   } catch (error) {
-    console.error('[Twilio] sendWhatsApp error full:', error);
-    console.error('[Twilio] message:', error.message, 'code:', error.code);
-    // #region agent log
-    agentDebug({
-      location: 'twilio.js:sendWhatsApp',
-      message: 'twilio_api_error',
-      data: {
-        code: error.code != null ? String(error.code) : null,
-        msg: String(error.message || '').slice(0, 200),
-        status: error.status,
-      },
-      hypothesisId: 'H2',
-    });
-    // #endregion
+    console.error('[Twilio] sendWhatsApp error:', error.message, 'code:', error.code);
     throw error;
   }
 }

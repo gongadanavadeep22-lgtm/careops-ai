@@ -1,10 +1,19 @@
 const express = require('express');
 const router = express.Router();
 const verifyToken = require('../middleware/verifyToken');
+const { authRoles, getClinicId } = require('../middleware/requireRole');
 const { db } = require('../services/firestore');
 const { sendWhatsApp } = require('../services/twilio');
 const { medicinesForVisit } = require('../utils/visitMedicines');
-const { agentDebug } = require('../utils/agentDebug');
+
+const DEFAULT_LIMIT = 50;
+const MAX_LIMIT = 100;
+
+function parseLimit(raw) {
+  const n = parseInt(String(raw || DEFAULT_LIMIT), 10);
+  if (Number.isNaN(n) || n < 1) return DEFAULT_LIMIT;
+  return Math.min(n, MAX_LIMIT);
+}
 
 function soapField(v) {
   if (v == null || v === '') return '—';
@@ -38,12 +47,15 @@ function patientFacingAppUrl() {
 }
 
 // GET /api/pharmacy/queue
-router.get('/queue', verifyToken, async (req, res, next) => {
+router.get('/queue', verifyToken, ...authRoles('pharmacist', 'doctor'), async (req, res, next) => {
   try {
+    const clinicId = getClinicId(req);
+    const limit = parseLimit(req.query.limit);
     const snapshot = await db
       .collection('visits')
-      .where('clinicId', '==', 'clinic-001')
+      .where('clinicId', '==', clinicId)
       .where('prescriptionStatus', '==', 'confirmed')
+      .limit(limit)
       .get();
 
     const prescriptions = await Promise.all(
@@ -77,14 +89,14 @@ router.get('/queue', verifyToken, async (req, res, next) => {
 
     prescriptions.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
 
-    res.json({ prescriptions });
+    res.json({ prescriptions, limit });
   } catch (err) {
     next(err);
   }
 });
 
 // POST /api/pharmacy/ready
-router.post('/ready', verifyToken, async (req, res, next) => {
+router.post('/ready', verifyToken, ...authRoles('pharmacist'), async (req, res, next) => {
   try {
     const { visitId } = req.body;
 
@@ -110,19 +122,6 @@ router.post('/ready', verifyToken, async (req, res, next) => {
     if (!patientPhone && visit.patientPhone) {
       patientPhone = String(visit.patientPhone).trim();
     }
-
-    // #region agent log
-    agentDebug({
-      location: 'pharmacy.js:ready',
-      message: 'patient_phone_resolved',
-      data: {
-        visitId: String(visitId),
-        hasPhone: !!(patientPhone && String(patientPhone).trim()),
-        phoneLen: patientPhone ? String(patientPhone).trim().length : 0,
-      },
-      hypothesisId: 'H3',
-    });
-    // #endregion
 
     // Step 3: Update visit status
     await db.collection('visits').doc(visitId).update({
@@ -192,14 +191,6 @@ router.post('/ready', verifyToken, async (req, res, next) => {
           'If using the sandbox, the patient must join your sandbox first (send the join code to the Twilio WhatsApp number). Check TWILIO_WHATSAPP_FROM and Railway logs [Twilio].';
       }
     } else {
-      // #region agent log
-      agentDebug({
-        location: 'pharmacy.js:ready',
-        message: 'skip_twilio_no_phone',
-        data: { visitId: String(visitId) },
-        hypothesisId: 'H3',
-      });
-      // #endregion
       whatsappWarning = 'Prescription marked as ready. No phone number found for patient.';
     }
 

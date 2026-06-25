@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { Loader2 } from 'lucide-react';
 import { getFirestoreDb } from '../firebase/config';
 import client from '../api/client';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
+import { useAuth } from '../hooks/useAuth';
 
 function medicinesForVisit(visit) {
   const rx = visit?.prescription;
@@ -88,6 +89,8 @@ function openWaMeFromVisit(visit, t) {
 
 export default function PharmacyDashboard() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const clinicId = user?.clinicId || 'clinic-001';
   const db = getFirestoreDb();
 
   const [active, setActive] = useState([]);
@@ -109,8 +112,9 @@ export default function PharmacyDashboard() {
   useEffect(() => {
     const q = query(
       collection(db, 'visits'),
-      where('clinicId', '==', 'clinic-001'),
-      where('prescriptionStatus', '==', 'confirmed')
+      where('clinicId', '==', clinicId),
+      where('prescriptionStatus', '==', 'confirmed'),
+      limit(100)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -126,14 +130,15 @@ export default function PharmacyDashboard() {
     }, () => setActiveLoading(false));
 
     return () => unsubscribe();
-  }, []);
+  }, [clinicId]);
 
   // ── COMPLETED PRESCRIPTIONS (dispensed) via onSnapshot ──
   useEffect(() => {
     const q = query(
       collection(db, 'visits'),
-      where('clinicId', '==', 'clinic-001'),
-      where('prescriptionStatus', '==', 'dispensed')
+      where('clinicId', '==', clinicId),
+      where('prescriptionStatus', '==', 'dispensed'),
+      limit(100)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -149,7 +154,7 @@ export default function PharmacyDashboard() {
     }, () => setCompletedLoading(false));
 
     return () => unsubscribe();
-  }, []);
+  }, [clinicId]);
 
   async function handleSelectVisit(visit) {
     setSelectedVisit(visit);
@@ -210,7 +215,12 @@ export default function PharmacyDashboard() {
         setReadyStatus(t('pharmacy.readyWithWarning', { warning: data.warning }));
       } else {
         setReadyTone('warning');
-        setReadyStatus(data.warning || t('pharmacy.readyWarnTwilio'));
+        const twilioMsg = data.twilioError?.message;
+        setReadyStatus(
+          twilioMsg
+            ? `${data.warning || t('pharmacy.readyWarnTwilio')} (${twilioMsg})`
+            : data.warning || t('pharmacy.readyWarnTwilio')
+        );
       }
 
       const waDigits = phoneDigitsForWaMe(patientPhone);

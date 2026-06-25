@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Calendar, Clock } from 'lucide-react';
 import client from '../api/client';
 import Layout from '../components/Layout';
@@ -8,6 +9,7 @@ import ErrorMessage from '../components/ErrorMessage';
 const VIEWS = ['Upcoming Appointments', 'Book Appointment'];
 
 export default function NurseDashboard() {
+  const [searchParams] = useSearchParams();
   const [activeView, setActiveView] = useState('Upcoming Appointments');
 
   // ── TODAY'S APPOINTMENTS STATE ──
@@ -51,6 +53,12 @@ export default function NurseDashboard() {
       setApptLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (searchParams.get('view') === 'book') {
+      setActiveView('Book Appointment');
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     loadTodayAppointments();

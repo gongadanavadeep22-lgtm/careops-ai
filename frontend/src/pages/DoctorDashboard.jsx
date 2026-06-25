@@ -1,10 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
-import { collection, query, where, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
 import { getFirestoreDb } from '../firebase/config';
 import client from '../api/client';
 import Layout from '../components/Layout';
 import EmergencyBanner from '../components/EmergencyBanner';
+import { useAuth } from '../hooks/useAuth';
 import { normalizeInsights, insightToString, tipToString } from '../utils/clinicalText';
 import {
   Loader2,
@@ -97,6 +98,8 @@ function WaitTime({ createdAt }) {
 
 export default function DoctorDashboard() {
   const { t, i18n } = useTranslation();
+  const { user } = useAuth();
+  const clinicId = user?.clinicId || 'clinic-001';
   const db = getFirestoreDb();
 
   const [queue, setQueue] = useState([]);
@@ -139,7 +142,8 @@ export default function DoctorDashboard() {
   useEffect(() => {
     const q = query(
       collection(db, 'appointments'),
-      where('clinicId', '==', 'clinic-001')
+      where('clinicId', '==', clinicId),
+      limit(100)
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -159,7 +163,7 @@ export default function DoctorDashboard() {
     }, () => setQueueLoading(false));
 
     return () => unsubscribe();
-  }, []);
+  }, [clinicId]);
 
   // Note: do not sync decisionPanel from Firestore onSnapshot — it races the /panel API
   // and often wipes insights right after a successful response.

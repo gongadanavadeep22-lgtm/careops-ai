@@ -1,12 +1,12 @@
 const express = require('express');
 const router = express.Router();
 const verifyToken = require('../middleware/verifyToken');
+const { authRoles } = require('../middleware/requireRole');
 const { db } = require('../services/firestore');
 const { generateSOAPNote, generateDecisionPanel } = require('../services/gemini');
-const { debugSessionLog } = require('../utils/debugSessionLog');
 
 // POST /api/consultation/soap
-router.post('/soap', verifyToken, async (req, res, next) => {
+router.post('/soap', verifyToken, ...authRoles('doctor'), async (req, res, next) => {
   try {
     const { visitId, transcript } = req.body;
 
@@ -54,13 +54,16 @@ router.post('/soap', verifyToken, async (req, res, next) => {
     };
     if (!hasAnySoap && !hasRx) {
       const fromAi = String(pv.message || result.prescriptionValidation?.message || '').trim();
+      const geminiMissing = !(process.env.GEMINI_API_KEY || '').trim();
       prescriptionValidation = {
         isCorrect: false,
         status: 'wrong',
         message:
           fromAi.length > 10
             ? fromAi
-            : 'No SOAP or medicines returned. In Railway: confirm GEMINI_API_KEY is a Google AI Studio key (starts with AIza), enable Generative Language API, then check logs for [Gemini] errors when you click Generate SOAP.',
+            : geminiMissing
+              ? 'GEMINI_API_KEY is not set on the server. Add it in backend/.env or Railway, then restart.'
+              : 'No SOAP or medicines returned. Check Railway logs for [Gemini] errors when you click Generate SOAP.',
         suggestedMedicines: [],
       };
     }
@@ -77,19 +80,6 @@ router.post('/soap', verifyToken, async (req, res, next) => {
       prescriptionValidation,
     });
 
-    // #region agent log
-    debugSessionLog({
-      hypothesisId: 'H4',
-      location: 'consultation.js:soap:response',
-      message: 'SOAP generated',
-      data: {
-        visitIdLen: String(visitId).length,
-        rxCount: (result.prescription || []).length,
-        subjLen: String(result.subjective || '').length,
-        validationOk: prescriptionValidation.isCorrect,
-      },
-    });
-    // #endregion
     res.json({
       success: true,
       soapNote: result,
@@ -98,20 +88,12 @@ router.post('/soap', verifyToken, async (req, res, next) => {
       prescriptionValidation,
     });
   } catch (err) {
-    // #region agent log
-    debugSessionLog({
-      hypothesisId: 'H4',
-      location: 'consultation.js:soap:catch',
-      message: String(err.message || err),
-      data: { visitIdLen: String(req.body?.visitId || '').length },
-    });
-    // #endregion
     next(err);
   }
 });
 
-// POST /api/consultation/panel  (optional body.transcript = consultation text for richer insights)
-router.post('/panel', verifyToken, async (req, res, next) => {
+// POST /api/consultation/panel
+router.post('/panel', verifyToken, ...authRoles('doctor'), async (req, res, next) => {
   try {
     const { visitId, transcript: consultationTranscript } = req.body;
 
@@ -167,28 +149,8 @@ router.post('/panel', verifyToken, async (req, res, next) => {
 
     await db.collection('visits').doc(visitId).update({ decisionPanel: insights });
 
-    // #region agent log
-    debugSessionLog({
-      hypothesisId: 'H4',
-      location: 'consultation.js:panel:response',
-      message: 'panel insights ready',
-      data: {
-        insightsCount: insights.length,
-        firstLen: insights[0] ? String(insights[0]).length : 0,
-        hasTranscript: Boolean(consultationTranscript && consultationTranscript.length),
-      },
-    });
-    // #endregion
     res.json({ success: true, insights });
   } catch (err) {
-    // #region agent log
-    debugSessionLog({
-      hypothesisId: 'H4',
-      location: 'consultation.js:panel:catch',
-      message: String(err.message || err),
-      data: {},
-    });
-    // #endregion
     next(err);
   }
 });

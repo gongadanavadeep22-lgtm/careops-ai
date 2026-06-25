@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const verifyToken = require('../middleware/verifyToken');
+const { authRoles } = require('../middleware/requireRole');
 const { db } = require('../services/firestore');
 
 // GET /api/visits/by-appointment?appointmentId=
-router.get('/by-appointment', verifyToken, async (req, res, next) => {
+router.get('/by-appointment', verifyToken, ...authRoles('doctor', 'nurse'), async (req, res, next) => {
   try {
     const { appointmentId } = req.query;
 

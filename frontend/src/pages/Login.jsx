@@ -18,18 +18,11 @@ import {
 } from '../firebase/config';
 import client from '../api/client';
 import LanguageSwitcher from '../components/LanguageSwitcher';
+import { dashboardPathForRole } from '../utils/roleRoutes';
 
 // Passwords: never stored in this app — Firebase Auth hashes credentials server-side (HTTPS).
 // Chrome’s “password found in a data breach” warning is from Google Password Checkup (browser),
 // comparing your password to known leaked lists; it is not specific to CareOps code.
-
-const ROLE_ROUTES = {
-  nurse: '/nurse',
-  doctor: '/doctor',
-  pharmacist: '/pharmacy',
-  ops: '/ops',
-  patient: '/patient',
-};
 
 const LOGIN_TEAM_AVATARS = [
   { src: '/avatars/nurse.jpg', labelKey: 'team.nurse' },
@@ -111,8 +104,8 @@ export default function Login() {
       const { data } = await client.get('/api/auth/me');
 
       const rawRole = typeof data.role === 'string' ? data.role.trim().toLowerCase() : '';
-      const destination = ROLE_ROUTES[rawRole];
-      if (!destination) {
+      const destination = dashboardPathForRole(rawRole);
+      if (destination === '/login') {
         await signOut(getFirebaseAuth());
         throw new Error(t('login.errorRoleUnknown'));
       }

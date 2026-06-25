@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const verifyToken = require('../middleware/verifyToken');
+const { authRoles } = require('../middleware/requireRole');
 const { db } = require('../services/firestore');
 
 // POST /api/vitals
-router.post('/', verifyToken, async (req, res, next) => {
+router.post('/', verifyToken, ...authRoles('nurse', 'ops'), async (req, res, next) => {
   try {
     const { visitId, bp, temperature, spo2 } = req.body;
 

@@ -47,6 +47,7 @@ export default function PatientDashboard() {
     phone: '',
     symptoms: '',
     allergies: '',
+    conditions: '',
     appointmentDate: '',
   });
 
@@ -77,6 +78,7 @@ export default function PatientDashboard() {
           phone: data.phone || '',
           symptoms: data.symptoms || '',
           allergies: data.allergies || '',
+          conditions: data.conditions || '',
           appointmentDate: data.appointmentDate || '',
         });
         setLabReports(data.labReports || []);
@@ -364,6 +366,17 @@ export default function PatientDashboard() {
                     onChange={handleChange}
                     placeholder="Describe your current symptoms (e.g. fever, headache, cough)"
                     rows={4}
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Medical conditions</label>
+                  <textarea
+                    name="conditions"
+                    value={form.conditions}
+                    onChange={handleChange}
+                    placeholder="e.g. diabetes, hypertension"
+                    rows={2}
                     className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 resize-none"
                   />
                 </div>

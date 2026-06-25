@@ -25,7 +25,7 @@ const ROLE_BADGE_CLASS = {
   ops: 'bg-yellow-100 text-yellow-800 border border-yellow-200',
 };
 
-/** Default profile photos per role (sidebar). Ops/demo keep letter fallback. */
+/** Default profile photos per role (sidebar). */
 const ROLE_AVATAR_SRC = {
   patient: '/avatars/patient.jpg',
   nurse: '/avatars/nurse.jpg',
@@ -44,10 +44,10 @@ function navItemsForRole(role) {
   switch (role) {
     case 'nurse':
       return [
-        { to: '/nurse', labelKey: 'navItems.dashboard', Icon: Home },
+        { to: '/nurse', labelKey: 'navItems.dashboard', Icon: Home, end: true },
         { to: '/patients/waiting', labelKey: 'navItems.appointments', Icon: Calendar },
         { to: '/patients/register', labelKey: 'navItems.patients', Icon: Users },
-        { to: '/appointments/book', labelKey: 'navItems.bookAppointment', Icon: Plus },
+        { to: '/nurse?view=book', labelKey: 'navItems.bookAppointment', Icon: Plus },
       ];
     case 'doctor':
       return [
@@ -78,7 +78,7 @@ function navItemsForRole(role) {
         { to: '/appointments/book', labelKey: 'navItems.bookAppointment', Icon: Plus },
       ];
     default:
-      return [{ to: '/demo', labelKey: 'navItems.dashboard', Icon: Home }];
+      return [{ to: '/login', labelKey: 'navItems.dashboard', Icon: Home }];
   }
 }
 
@@ -165,10 +165,11 @@ export default function Navbar() {
 
       {/* Nav */}
       <nav className="flex flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-4">
-        {items.map(({ to, labelKey, Icon }) => (
+        {items.map(({ to, labelKey, Icon, end }) => (
           <NavLink
             key={`${to}-${labelKey}`}
             to={to}
+            end={end}
             className={({ isActive }) =>
               [
                 'flex items-center gap-3 rounded-lg border-l-4 px-3 py-2.5 text-sm font-medium transition-colors',

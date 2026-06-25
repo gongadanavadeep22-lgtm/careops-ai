@@ -1,10 +1,11 @@
 const express = require('express');
 const router = express.Router();
 const verifyToken = require('../middleware/verifyToken');
+const { authRoles } = require('../middleware/requireRole');
 const { rtdb } = require('../services/firestore');
 
 // PATCH /api/emergency/dismiss
-router.patch('/dismiss', verifyToken, async (req, res, next) => {
+router.patch('/dismiss', verifyToken, ...authRoles('nurse', 'doctor', 'ops'), async (req, res, next) => {
   try {
     const { emergencyKey } = req.body;
 

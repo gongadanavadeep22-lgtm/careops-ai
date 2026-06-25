@@ -2,11 +2,12 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const verifyToken = require('../middleware/verifyToken');
+const { authRoles } = require('../middleware/requireRole');
 const { db, admin } = require('../services/firestore');
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10 MB
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowed = ['application/pdf', 'image/jpeg', 'image/png', 'image/jpg'];
     if (allowed.includes(file.mimetype)) {
@@ -18,7 +19,7 @@ const upload = multer({
 });
 
 // GET /api/patients/profile
-router.get('/profile', verifyToken, async (req, res, next) => {
+router.get('/profile', verifyToken, ...authRoles('patient'), async (req, res, next) => {
   try {
     const uid = req.user.uid;
     const doc = await db.collection('patients').doc(uid).get();
@@ -32,6 +33,7 @@ router.get('/profile', verifyToken, async (req, res, next) => {
         phone: '',
         symptoms: '',
         allergies: '',
+        conditions: '',
         appointmentDate: '',
         labReports: [],
       });
@@ -44,10 +46,10 @@ router.get('/profile', verifyToken, async (req, res, next) => {
 });
 
 // POST /api/patients/profile
-router.post('/profile', verifyToken, async (req, res, next) => {
+router.post('/profile', verifyToken, ...authRoles('patient'), async (req, res, next) => {
   try {
     const uid = req.user.uid;
-    const { name, age, area, phone, symptoms, allergies, appointmentDate } = req.body;
+    const { name, age, area, phone, symptoms, allergies, conditions, appointmentDate } = req.body;
 
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Name is required' });
@@ -64,6 +66,7 @@ router.post('/profile', verifyToken, async (req, res, next) => {
       phone: String(phone || '').trim().replace(/\s/g, ''),
       symptoms: (symptoms || '').trim(),
       allergies: (allergies || '').trim(),
+      conditions: (conditions || '').trim(),
       appointmentDate: appointmentDate || '',
       updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     };
@@ -77,7 +80,7 @@ router.post('/profile', verifyToken, async (req, res, next) => {
 });
 
 // POST /api/patients/lab-reports
-router.post('/lab-reports', verifyToken, upload.single('file'), async (req, res, next) => {
+router.post('/lab-reports', verifyToken, ...authRoles('patient'), upload.single('file'), async (req, res, next) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No file uploaded' });
@@ -94,12 +97,16 @@ router.post('/lab-reports', verifyToken, upload.single('file'), async (req, res,
       metadata: { contentType: req.file.mimetype },
     });
 
-    await fileRef.makePublic();
-    const publicUrl = `https://storage.googleapis.com/${bucket.name}/${filePath}`;
+    const expires = Date.now() + 7 * 24 * 60 * 60 * 1000;
+    const [signedUrl] = await fileRef.getSignedUrl({
+      action: 'read',
+      expires,
+    });
 
     const reportEntry = {
       name: req.file.originalname,
-      url: publicUrl,
+      url: signedUrl,
+      storagePath: filePath,
       uploadedAt: new Date().toISOString(),
     };
 
@@ -115,7 +122,7 @@ router.post('/lab-reports', verifyToken, upload.single('file'), async (req, res,
 });
 
 // GET /api/patients/by-id?patientId=
-router.get('/by-id', verifyToken, async (req, res, next) => {
+router.get('/by-id', verifyToken, ...authRoles('doctor', 'nurse', 'pharmacist', 'ops'), async (req, res, next) => {
   try {
     const { patientId } = req.query;
 
