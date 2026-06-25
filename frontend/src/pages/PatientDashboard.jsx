@@ -102,8 +102,8 @@ export default function PatientDashboard() {
 
     try {
       await client.post('/api/patients/profile', form);
-      setSaveStatus('Saved successfully!');
-      setTimeout(() => setSaveStatus(''), 3000);
+      setSaveStatus('Profile saved! Nurse can now find you when booking an appointment.');
+      setTimeout(() => setSaveStatus(''), 5000);
     } catch (err) {
       setSaveError(err.response?.data?.error || 'Failed to save. Please try again.');
     }

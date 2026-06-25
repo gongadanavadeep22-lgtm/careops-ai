@@ -127,19 +127,52 @@ router.get('/list', verifyToken, ...authRoles('nurse', 'ops', 'doctor'), async (
     const q = String(req.query.q || '')
       .trim()
       .toLowerCase();
-    const snap = await db.collection('patients').limit(200).get();
-    let patients = snap.docs.map((doc) => {
+
+    const [usersSnap, patientsSnap] = await Promise.all([
+      db.collection('users').where('role', '==', 'patient').limit(200).get(),
+      db.collection('patients').limit(200).get(),
+    ]);
+
+    const profileByUid = new Map(
+      patientsSnap.docs.map((doc) => [doc.id, { id: doc.id, ...doc.data() }])
+    );
+    const merged = new Map();
+
+    for (const doc of patientsSnap.docs) {
       const data = doc.data();
-      return {
+      const name = String(data.name || '').trim();
+      if (!name) continue;
+      merged.set(doc.id, {
         id: doc.id,
         uid: data.uid || doc.id,
-        name: data.name || '',
-        phone: data.phone || '',
-        area: data.area || '',
-        symptoms: data.symptoms || '',
+        name,
+        phone: String(data.phone || '').trim(),
+        area: String(data.area || '').trim(),
+        symptoms: String(data.symptoms || '').trim(),
         age: data.age ?? '',
-      };
-    });
+        profileComplete: Boolean(name && data.age),
+      });
+    }
+
+    for (const doc of usersSnap.docs) {
+      if (merged.has(doc.id)) continue;
+      const user = doc.data();
+      const profile = profileByUid.get(doc.id) || {};
+      const name = String(profile.name || user.name || '').trim();
+      if (!name) continue;
+      merged.set(doc.id, {
+        id: doc.id,
+        uid: doc.id,
+        name,
+        phone: String(profile.phone || '').trim(),
+        area: String(profile.area || '').trim(),
+        symptoms: String(profile.symptoms || '').trim(),
+        age: profile.age ?? '',
+        profileComplete: Boolean(profile.name && profile.age),
+      });
+    }
+
+    let patients = Array.from(merged.values());
     if (q) {
       patients = patients.filter(
         (p) =>
@@ -149,7 +182,7 @@ router.get('/list', verifyToken, ...authRoles('nurse', 'ops', 'doctor'), async (
       );
     }
     patients.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    res.json({ patients: patients.slice(0, 50) });
+    res.json({ patients: patients.slice(0, 50), total: merged.size });
   } catch (err) {
     next(err);
   }

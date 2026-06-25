@@ -37,32 +37,43 @@ export default function BookAppointmentForm({ onSuccess }) {
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
-
-  useEffect(() => {
-    Promise.all([
-      client.get('/api/patients/list').then(({ data }) => setPatients(data.patients || [])),
-      client.get('/api/doctors').then(({ data }) => setDoctors(data.doctors || [])),
-    ])
-      .catch(() => {})
-      .finally(() => {
-        setPatientsLoading(false);
-        setDoctorsLoading(false);
-      });
-  }, []);
+  const [listError, setListError] = useState('');
 
   async function loadPatients(query) {
     setPatientsLoading(true);
+    setListError('');
     try {
       const { data } = await client.get('/api/patients/list', {
         params: query ? { q: query } : undefined,
       });
       setPatients(data.patients || []);
-    } catch {
+      if ((data.patients || []).length === 0 && query) {
+        setListError(`No patient named "${query}" found. Ask them to log in, fill Profile (name + age), and tap Save Changes.`);
+      }
+    } catch (err) {
+      const status = err.response?.status;
+      const msg = err.response?.data?.error;
+      if (status === 404) {
+        setListError('Patient list API not found — redeploy the backend on Railway (latest code).');
+      } else if (status === 403) {
+        setListError('Access denied. Log in as nurse, doctor, or ops.');
+      } else {
+        setListError(msg || 'Could not load patients. Check network and API URL on Vercel.');
+      }
       setPatients([]);
     } finally {
       setPatientsLoading(false);
     }
   }
+
+  useEffect(() => {
+    loadPatients('');
+    client
+      .get('/api/doctors')
+      .then(({ data }) => setDoctors(data.doctors || []))
+      .catch(() => setDoctors([]))
+      .finally(() => setDoctorsLoading(false));
+  }, []);
 
   function applyPatientProfile(patient) {
     const fields = profileToBookingFields(patient);
@@ -197,9 +208,16 @@ export default function BookAppointmentForm({ onSuccess }) {
             </option>
           ))}
         </select>
-        {patients.length === 0 && !patientsLoading && (
+        {patientsLoading && (
+          <p className="text-xs text-gray-500">Loading registered patients…</p>
+        )}
+        {listError && (
+          <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded px-3 py-2">{listError}</p>
+        )}
+        {!patientsLoading && !listError && patients.length === 0 && (
           <p className="text-xs text-amber-700">
-            No registered patients found. Patient must sign in and save their profile first.
+            No registered patients yet. Patient must sign in, enter <strong>name + age</strong> on Profile, and tap{' '}
+            <strong>Save Changes</strong> before they appear here.
           </p>
         )}
       </div>
