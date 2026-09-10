@@ -1,11 +1,12 @@
 /**
- * Sync Firestore users/{uid} for @careops.com demo accounts (merge only — does not delete data).
+ * Sync Firestore users/{uid} for all Firebase Auth accounts (merge only — does not delete data).
  * Run: node scripts/sync-users.js
  */
 require('dotenv').config();
 const admin = require('firebase-admin');
+const { inferRoleAndName } = require('../src/utils/userProfile');
 
-const accounts = [
+const defaultAccounts = [
   { email: 'doctor@careops.com', role: 'doctor', name: 'Dr Sharma' },
   { email: 'nurse@careops.com', role: 'nurse', name: 'Nurse Priya' },
   { email: 'pharmacy@careops.com', role: 'pharmacist', name: 'Pharmacist Anita' },
@@ -20,19 +21,31 @@ async function main() {
   }
   const db = admin.firestore();
 
-  for (const a of accounts) {
-    try {
-      const user = await admin.auth().getUserByEmail(a.email);
-      await db.collection('users').doc(user.uid).set(
-        { uid: user.uid, name: a.name, role: a.role, clinicId: 'clinic-001' },
-        { merge: true }
-      );
-      console.log('OK', a.role, a.email);
-    } catch (e) {
-      console.warn('SKIP', a.email, '-', e.message);
-    }
+  // 1. Sync all existing users in Firebase Auth
+  const list = await admin.auth().listUsers();
+  console.log(`Found ${list.users.length} users in Firebase Authentication.`);
+
+  for (const user of list.users) {
+    const predefined = defaultAccounts.find(
+      (a) => a.email.toLowerCase() === (user.email || '').toLowerCase()
+    );
+    const { role, name } = predefined || inferRoleAndName(user.email, user.displayName);
+
+    await db.collection('users').doc(user.uid).set(
+      {
+        uid: user.uid,
+        email: user.email,
+        name: user.displayName || name,
+        role,
+        clinicId: 'clinic-001',
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+    console.log(`✓ Synced: ${user.email} -> role: ${role} (uid: ${user.uid})`);
   }
-  console.log('Done.');
+
+  console.log('Sync completed successfully.');
 }
 
 main().catch((e) => {

@@ -2,6 +2,8 @@ const { db } = require('../services/firestore');
 
 const DEFAULT_CLINIC_ID = 'clinic-001';
 
+const { inferRoleAndName } = require('../utils/userProfile');
+
 /**
  * Attach req.userProfile { uid, name, role, clinicId } from Firestore users/{uid}.
  */
@@ -10,9 +12,29 @@ async function loadUserProfile(req, res, next) {
     return res.status(401).json({ error: 'Authentication required' });
   }
   try {
-    const doc = await db.collection('users').doc(req.user.uid).get();
+    const userRef = db.collection('users').doc(req.user.uid);
+    let doc = await userRef.get();
     if (!doc.exists) {
-      return res.status(404).json({ error: 'User not found in Firestore' });
+      const email = req.user.email || '';
+      const { role, name } = inferRoleAndName(email, req.user.name);
+      const clinicId = DEFAULT_CLINIC_ID;
+      const newUserData = {
+        uid: req.user.uid,
+        email,
+        name,
+        role,
+        clinicId,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await userRef.set(newUserData, { merge: true });
+      req.userProfile = {
+        uid: req.user.uid,
+        name,
+        role,
+        clinicId,
+      };
+      return next();
     }
     const data = doc.data();
     req.userProfile = {
