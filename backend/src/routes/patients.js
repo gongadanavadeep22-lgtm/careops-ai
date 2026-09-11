@@ -64,6 +64,7 @@ router.post('/profile', verifyToken, ...authRoles('patient'), async (req, res, n
       return res.status(400).json({ error: phoneCheck.error, code: 'INVALID_PHONE' });
     }
 
+    // Shared phones are allowed (e.g. family members on one mobile).
     const profileData = {
       uid,
       name: name.trim(),
