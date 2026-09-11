@@ -1,14 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  Plus,
-  Check,
-  Mail,
+  ArrowRight,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  Globe,
   Lock,
-  AlertTriangle,
-  BarChart3,
+  Mail,
   Shield,
 } from 'lucide-react';
 import {
@@ -17,18 +18,86 @@ import {
   isFirebaseConfigured,
 } from '../firebase/config';
 import client from '../api/client';
-import LanguageSwitcher from '../components/LanguageSwitcher';
 import { dashboardPathForRole } from '../utils/roleRoutes';
 
-// Passwords: never stored in this app — Firebase Auth hashes credentials server-side (HTTPS).
-// Chrome’s “password found in a data breach” warning is from Google Password Checkup (browser),
-// comparing your password to known leaked lists; it is not specific to CareOps code.
+const REMEMBER_EMAIL_KEY = 'careops_login_email';
 
-const LOGIN_TEAM_AVATARS = [
-  { src: '/avatars/nurse.jpg', labelKey: 'team.nurse' },
-  { src: '/avatars/doctor-male.jpg', labelKey: 'team.doctor' },
-  { src: '/avatars/pharmacist.jpg', labelKey: 'team.pharmacy' },
+const LANGUAGE_OPTIONS = [
+  { code: 'en', label: 'English' },
+  { code: 'hi', label: 'हिंदी' },
+  { code: 'te', label: 'తెలుగు' },
+  { code: 'ta', label: 'தமிழ்' },
 ];
+
+function CareOpsLogo({ compact = false }) {
+  const iconSize = compact ? 'h-9 w-9' : 'h-10 w-10';
+  const svgSize = compact ? 'h-[18px] w-[18px]' : 'h-5 w-5';
+
+  return (
+    <div className="flex items-center gap-2">
+      <span
+        className={`login-brand-icon flex shrink-0 items-center justify-center rounded-lg ${iconSize}`}
+      >
+        <svg viewBox="0 0 24 24" className={svgSize} aria-hidden>
+          <path d="M11 4h2v7h7v2h-7v7h-2v-7H4v-2h7V4z" fill="white" />
+          <circle cx="12" cy="12" r="2" fill="white" />
+        </svg>
+      </span>
+      <span className={`font-bold tracking-tight ${compact ? 'text-base' : 'text-lg'}`}>
+        <span className="text-gray-900">CareOps </span>
+        <span className="login-brand-blue">AI</span>
+      </span>
+    </div>
+  );
+}
+
+function LoginLanguageSwitcher() {
+  const { t, i18n } = useTranslation();
+  const base = (i18n.language || 'en').split('-')[0];
+  const value = LANGUAGE_OPTIONS.some((o) => o.code === base) ? base : 'en';
+
+  return (
+    <label className="relative inline-flex items-center">
+      <span className="sr-only">{t('nav.language')}</span>
+      <Globe className="pointer-events-none absolute left-3 h-4 w-4 text-gray-500" aria-hidden />
+      <select
+        value={value}
+        onChange={(e) => i18n.changeLanguage(e.target.value)}
+        aria-label={t('nav.language')}
+        className="h-9 cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white py-0 pl-8 pr-8 text-sm font-medium text-gray-600 login-input-focus"
+      >
+        {LANGUAGE_OPTIONS.map(({ code, label }) => (
+          <option key={code} value={code}>
+            {label}
+          </option>
+        ))}
+      </select>
+      <ChevronDown className="pointer-events-none absolute right-3 h-4 w-4 text-gray-400" aria-hidden />
+    </label>
+  );
+}
+
+function GoogleIcon() {
+  return (
+    <svg className="h-5 w-5 shrink-0" viewBox="0 0 24 24" aria-hidden>
+      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
+      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+    </svg>
+  );
+}
+
+function MicrosoftIcon() {
+  return (
+    <svg className="h-5 w-5 shrink-0" viewBox="0 0 23 23" aria-hidden>
+      <path fill="#f25022" d="M1 1h10v10H1z" />
+      <path fill="#00a4ef" d="M12 1h10v10H12z" />
+      <path fill="#7fba00" d="M1 12h10v10H1z" />
+      <path fill="#ffb900" d="M12 12h10v10H12z" />
+    </svg>
+  );
+}
 
 function apiUrlConfigured() {
   const raw = import.meta.env.VITE_API_URL;
@@ -38,13 +107,10 @@ function apiUrlConfigured() {
 function firebaseConfigErrorMessage(t) {
   const missing = getMissingFirebaseEnvVars();
   const list = missing.length ? missing.join(', ') : 'VITE_FIREBASE_*';
-  if (import.meta.env.PROD) {
-    return t('login.errorFirebaseProd', { list });
-  }
+  if (import.meta.env.PROD) return t('login.errorFirebaseProd', { list });
   return t('login.errorFirebaseDev', { list });
 }
 
-/** Maps Firebase, fetch, axios, and network errors to a clear UI message. */
 function loginErrorMessage(err, t) {
   const code = err?.code;
   if (typeof code === 'string' && code.startsWith('auth/')) {
@@ -53,35 +119,72 @@ function loginErrorMessage(err, t) {
     if (translated && translated !== key) return translated;
     return err.message || t('login.auth_generic');
   }
-
   const status = err?.response?.status;
-  if (status === 404) {
-    return t('login.errorAccount404');
-  }
-  if (status === 401) {
-    return t('login.error401');
-  }
+  if (status === 404) return t('login.errorAccount404');
+  if (status === 401) return t('login.error401');
   const apiMsg = err?.response?.data?.error;
   if (typeof apiMsg === 'string' && apiMsg.trim()) return apiMsg;
-
   const msg = err?.message || '';
   if (msg === 'Network Error' || msg === 'Failed to fetch') {
-    if (import.meta.env.PROD) {
-      return t('login.errorNetwork');
-    }
+    if (import.meta.env.PROD) return t('login.errorNetwork');
     const api = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
     return t('login.errorNetworkDev', { api, origin: window.location.origin });
   }
   return msg || t('login.errorLoginGeneric');
 }
 
+function LoginHeroPanel() {
+  const { t } = useTranslation();
+
+  return (
+    <>
+      {/* Desktop — full hero artwork (your provided panel) */}
+      <aside className="login-hero-panel relative hidden min-h-screen w-1/2 shrink-0 lg:block">
+        <img
+          src="/login-hero-panel.png"
+          alt=""
+          className="login-hero-img"
+          decoding="sync"
+          fetchPriority="high"
+        />
+        <span className="sr-only">
+          {t('login.heroWelcome')} {t('login.heroBrand')}. {t('login.heroDescription')}
+        </span>
+      </aside>
+
+      {/* Mobile — compact hero strip */}
+      <div className="login-hero-panel relative h-32 w-full shrink-0 sm:h-36 lg:hidden">
+        <img
+          src="/login-hero-panel.png"
+          alt=""
+          className="login-hero-img"
+        />
+      </div>
+    </>
+  );
+}
+
 export default function Login() {
   const { t } = useTranslation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [rememberMe, setRememberMe] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(REMEMBER_EMAIL_KEY);
+      if (saved) {
+        setEmail(saved);
+        setRememberMe(true);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -89,13 +192,10 @@ export default function Login() {
     setLoading(true);
 
     if (!apiUrlConfigured()) {
-      setError(
-        import.meta.env.PROD ? t('login.errorApiUrlProd') : t('login.errorApiUrlDev')
-      );
+      setError(import.meta.env.PROD ? t('login.errorApiUrlProd') : t('login.errorApiUrlDev'));
       setLoading(false);
       return;
     }
-
     if (!isFirebaseConfigured()) {
       setError(firebaseConfigErrorMessage(t));
       setLoading(false);
@@ -103,26 +203,19 @@ export default function Login() {
     }
 
     try {
+      if (rememberMe) localStorage.setItem(REMEMBER_EMAIL_KEY, email.trim());
+      else localStorage.removeItem(REMEMBER_EMAIL_KEY);
+
       await signInWithEmailAndPassword(getFirebaseAuth(), email, password);
-
       const { data } = await client.get('/api/auth/me');
-
       const rawRole = typeof data.role === 'string' ? data.role.trim().toLowerCase() : '';
       const destination = dashboardPathForRole(rawRole);
       if (destination === '/login') {
         await signOut(getFirebaseAuth());
         throw new Error(t('login.errorRoleUnknown'));
       }
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.debug('[CareOps login]', { role: rawRole, destination });
-      }
       navigate(destination, { replace: true });
     } catch (err) {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.error('[CareOps login]', err);
-      }
       if (getFirebaseAuth().currentUser) {
         try {
           await signOut(getFirebaseAuth());
@@ -136,215 +229,158 @@ export default function Login() {
     }
   }
 
-  const features = [t('login.feature1'), t('login.feature2'), t('login.feature3')];
+  const inputClass =
+    'login-input-focus w-full rounded-lg border border-gray-200 bg-white py-2.5 pl-10 pr-4 text-[16px] text-gray-900 placeholder:text-gray-400';
+
+  const linkClass = 'login-brand-link text-sm hover:underline';
 
   return (
-    <div className="flex min-h-screen w-full justify-center bg-[#f0f4f8] p-3 sm:p-4 md:p-5">
-      <div className="flex w-full max-w-[1600px] flex-1 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl lg:min-h-[calc(100vh-40px)]">
-        <div className="flex min-h-0 flex-1 flex-col lg:min-h-0 lg:flex-row">
-        {/* LEFT — branding & visuals */}
-        <div className="flex min-h-0 flex-1 flex-col bg-gradient-to-br from-blue-600 to-blue-800 px-6 py-8 text-white sm:px-10 sm:py-10 lg:overflow-y-auto">
-          <div className="flex items-center gap-3">
-            <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20">
-              <Plus className="h-6 w-6 stroke-[2.5]" aria-hidden />
-            </span>
-            <span className="text-xl font-bold tracking-tight">CareOps AI</span>
-          </div>
+    <div className="flex min-h-screen flex-col lg:flex-row">
+      <LoginHeroPanel />
 
-          <h1 className="mt-6 text-2xl font-bold leading-tight sm:mt-8 sm:text-3xl">
-            {t('login.welcomeTitle')}
-          </h1>
-          <p className="mt-3 max-w-lg text-sm text-blue-100">
-            {t('login.subtitle')}
-          </p>
-
-          <ul className="mt-6 space-y-2 sm:mt-8">
-            {features.map((text) => (
-              <li key={text} className="flex items-start gap-2 text-sm text-blue-50">
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white/20">
-                  <Check className="h-3 w-3" strokeWidth={3} aria-hidden />
-                </span>
-                {text}
-              </li>
-            ))}
-          </ul>
-
-          <div className="mt-6 rounded-xl border border-white/20 bg-white/10 p-4 backdrop-blur-sm sm:mt-8">
-            <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-blue-100">
-              {t('login.sampleInsights')}
-            </p>
-            <div className="space-y-3 text-sm">
-              <div className="flex gap-2 rounded-lg bg-white/5 p-2">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-300" aria-hidden />
-                <span className="text-white/95">{t('login.insightSpo2')}</span>
-              </div>
-              <div className="flex gap-2 rounded-lg bg-white/5 p-2">
-                <BarChart3 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-300" aria-hidden />
-                <span className="text-white/95">{t('login.insightBp')}</span>
-              </div>
-              <div className="flex gap-2 rounded-lg bg-white/5 p-2">
-                <Shield className="mt-0.5 h-4 w-4 shrink-0 text-red-300" aria-hidden />
-                <span className="text-white/95">{t('login.insightAllergy')}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Physicians + team avatars — replaces bottom illustration */}
-          <div className="mt-8 border-t border-white/15 pt-6 lg:mt-auto">
-            <p className="text-center text-xs font-semibold uppercase tracking-wide text-blue-100/90">
-              {t('login.clinicalTeam')}
-            </p>
-            <div className="mt-4 flex flex-wrap items-end justify-center gap-4 sm:gap-6">
-              <figure className="text-center">
-                <img
-                  src="/avatars/login-doctor-male.jpg"
-                  alt=""
-                  className="mx-auto h-36 w-[7.25rem] rounded-2xl object-cover shadow-lg ring-2 ring-white/30 sm:h-44 sm:w-36"
-                />
-                <figcaption className="mt-2 text-[11px] font-medium text-blue-100/90">
-                  {t('login.physician')}
-                </figcaption>
-              </figure>
-              <figure className="text-center">
-                <img
-                  src="/avatars/login-doctor-female.jpg"
-                  alt=""
-                  className="mx-auto h-36 w-[7.25rem] rounded-2xl object-cover shadow-lg ring-2 ring-white/30 sm:h-44 sm:w-36"
-                />
-                <figcaption className="mt-2 text-[11px] font-medium text-blue-100/90">
-                  {t('login.physician')}
-                </figcaption>
-              </figure>
-            </div>
-
-            <div className="mt-6 flex flex-wrap items-center justify-center gap-5 sm:gap-6">
-              {LOGIN_TEAM_AVATARS.map(({ src, labelKey }) => (
-                <div key={labelKey} className="flex flex-col items-center gap-1.5">
-                  <img
-                    src={src}
-                    alt=""
-                    className="h-12 w-12 rounded-full object-cover ring-2 ring-white/40 shadow-md sm:h-14 sm:w-14"
-                  />
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-blue-100/85">
-                    {t(labelKey)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
+      <main className="login-auth-bg relative flex min-h-0 w-full flex-1 flex-col lg:min-h-screen lg:w-1/2">
+        <div className="flex justify-end px-5 pt-5 sm:px-8 sm:pt-6 lg:absolute lg:right-8 lg:top-6 lg:z-20 lg:px-0 lg:pt-0">
+          <LoginLanguageSwitcher />
         </div>
 
-        {/* RIGHT — form */}
-        <div className="flex w-full shrink-0 flex-col justify-start border-t border-gray-100 bg-white px-6 pb-8 pt-5 sm:px-10 sm:pb-10 sm:pt-6 lg:w-[min(100%,460px)] lg:border-l lg:border-t-0 lg:pb-12 lg:pt-8 xl:w-[min(100%,480px)]">
-          <div className="mb-4 w-full max-w-sm">
-            <LanguageSwitcher />
-          </div>
-          <div className="mb-6 flex flex-col items-center sm:mb-7">
-            {/* mix-blend-multiply: softens baked-in white in the PNG on this white panel */}
-            <div className="flex w-full justify-center [isolation:isolate]">
-              <img
-                src="/logo-careops.png"
-                alt=""
-                width={400}
-                height={400}
-                className="h-[11rem] w-auto max-h-[18rem] max-w-[min(100%,26rem)] object-contain mix-blend-multiply sm:h-[13rem] sm:max-h-[20rem] sm:max-w-[28rem]"
-              />
-            </div>
-            <p
-              className="mt-3 text-center text-3xl font-extrabold tracking-tight text-[#1565C0] sm:mt-4 sm:text-4xl"
-              style={{
-                textShadow:
-                  '0 1px 0 #fff, 0 2px 0 #e3f2fd, 0 4px 8px rgba(21,101,192,0.35), 0 6px 16px rgba(10,102,255,0.15)',
-              }}
-            >
-              CareOps AI
-            </p>
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900">{t('login.signIn')}</h2>
-          <p className="mt-1 text-sm text-gray-500">{t('login.credentialsHint')}</p>
-
-          {error && (
-            <p className="mt-6 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-              {error}
-            </p>
-          )}
-
-          <form
-            onSubmit={handleSubmit}
-            className={`flex flex-col gap-4 ${error ? 'mt-4' : 'mt-8'}`}
-          >
-            <div>
-              <label htmlFor="login-email" className="sr-only">
-                Email
-              </label>
-              <div className="relative">
-                <Mail
-                  className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400"
-                  aria-hidden
-                />
-                <input
-                  id="login-email"
-                  type="email"
-                  placeholder={t('login.emailPlaceholder')}
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
-                  className="w-full rounded-lg border border-gray-200 bg-slate-50/80 py-2.5 pl-10 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-                />
-              </div>
+        <div className="flex flex-1 flex-col justify-center px-5 pb-6 pt-2 sm:px-8 lg:px-10 lg:py-8">
+          <div className="login-auth-card mx-auto w-full max-w-[400px] px-6 py-6 sm:px-8 sm:py-7">
+            <div className="mb-5">
+              <CareOpsLogo compact />
             </div>
 
-            <div>
-              <label htmlFor="login-password" className="sr-only">
-                Password
-              </label>
-              <div className="relative">
-                <Lock
-                  className="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-gray-400"
-                  aria-hidden
-                />
-                <input
-                  id="login-password"
-                  type="password"
-                  placeholder={t('login.passwordPlaceholder')}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                  className="w-full rounded-lg border border-gray-200 bg-slate-50/80 py-2.5 pl-10 pr-3 text-sm text-gray-900 placeholder:text-gray-400 focus:border-primary-500 focus:bg-white focus:outline-none focus:ring-2 focus:ring-primary-500/20"
-                />
-              </div>
+            <div className="mb-5">
+              <h2 className="text-2xl font-bold text-gray-900">{t('login.welcomeBack')}</h2>
+              <p className="mt-1 text-sm text-gray-500">{t('login.signInContinue')}</p>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="mt-2 w-full rounded-lg bg-primary-600 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {loading ? t('login.signingIn') : t('login.signIn')}
-            </button>
-
-            <button
-              type="button"
-              className="text-center text-sm text-primary-600 hover:underline"
-            >
-              {t('login.forgotPassword')}
-            </button>
-
-            <p className="text-center text-xs text-gray-500">
-              {t('login.troublePrefix')}{' '}
-              <a
-                href="mailto:admin@careops.com"
-                className="font-medium text-primary-600 hover:underline"
+            {error && (
+              <p
+                role="alert"
+                className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
               >
-                admin@careops.com
-              </a>
+                {error}
+              </p>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
+              <div>
+                <label htmlFor="login-email" className="mb-1 block text-sm font-semibold text-gray-800">
+                  {t('login.emailLabel')}
+                </label>
+                <div className="relative">
+                  <Mail className="pointer-events-none absolute left-3 top-1/2 h-[17px] w-[17px] -translate-y-1/2 text-gray-400" aria-hidden />
+                  <input
+                    id="login-email"
+                    type="email"
+                    placeholder={t('login.emailPlaceholder')}
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label htmlFor="login-password" className="mb-1 block text-sm font-semibold text-gray-800">
+                  {t('login.passwordLabel')}
+                </label>
+                <div className="relative">
+                  <Lock className="pointer-events-none absolute left-3 top-1/2 h-[17px] w-[17px] -translate-y-1/2 text-gray-400" aria-hidden />
+                  <input
+                    id="login-password"
+                    type={showPassword ? 'text' : 'password'}
+                    placeholder={t('login.passwordPlaceholder')}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                    className={`${inputClass} pr-10`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded p-1 text-gray-400 hover:text-gray-600"
+                    aria-label={showPassword ? t('login.hidePassword') : t('login.showPassword')}
+                  >
+                    {showPassword ? (
+                      <EyeOff className="h-[17px] w-[17px]" aria-hidden />
+                    ) : (
+                      <Eye className="h-[17px] w-[17px]" aria-hidden />
+                    )}
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-0.5">
+                <label className="flex cursor-pointer items-center gap-2 text-sm text-gray-600">
+                  <input
+                    type="checkbox"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                    className="h-4 w-4 rounded border-gray-300 accent-[#2563eb]"
+                  />
+                  {t('login.rememberMe')}
+                </label>
+                <button type="button" className={linkClass}>
+                  {t('login.forgotPassword')}
+                </button>
+              </div>
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="login-brand-btn flex w-full items-center justify-center gap-2 rounded-lg py-3 text-sm text-white transition disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {loading ? t('login.signingIn') : t('login.signIn')}
+                {!loading && <ArrowRight className="h-4 w-4" strokeWidth={2.5} aria-hidden />}
+              </button>
+            </form>
+
+            <div className="relative my-4">
+              <div className="absolute inset-0 flex items-center" aria-hidden>
+                <div className="w-full border-t border-gray-200" />
+              </div>
+              <p className="relative mx-auto w-fit bg-white px-2 text-[10px] font-medium uppercase tracking-wider text-gray-400">
+                {t('login.orContinueWith')}
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => setError(t('login.ssoUnavailable'))}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+              >
+                <GoogleIcon />
+                {t('login.continueGoogle')}
+              </button>
+              <button
+                type="button"
+                onClick={() => setError(t('login.ssoUnavailable'))}
+                className="flex w-full items-center justify-center gap-2 rounded-lg border border-gray-200 bg-white py-2.5 text-sm font-medium text-gray-700 transition hover:bg-gray-50"
+              >
+                <MicrosoftIcon />
+                {t('login.continueMicrosoft')}
+              </button>
+            </div>
+
+            <p className="mt-4 text-center text-sm text-gray-600">
+              {t('login.noAccount')}{' '}
+              <Link to="/patients/register" className={`${linkClass} font-semibold`}>
+                {t('login.createOne')}
+              </Link>
             </p>
-          </form>
+
+            <p className="mt-4 flex items-center justify-center gap-1.5 text-xs text-gray-400">
+              <Shield className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t('login.secureData')}
+            </p>
+          </div>
         </div>
-        </div>
-      </div>
+      </main>
     </div>
   );
 }
