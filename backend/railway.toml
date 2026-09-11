@@ -1,6 +1,5 @@
-[build]
-builder = "nixpacks"
-
+# Used when Railway Root Directory is set to `backend`.
+# builder is omitted so Railway uses the current default (Railpack).
 [deploy]
 startCommand = "npm run start"
 healthcheckPath = "/health"

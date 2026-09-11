@@ -1,0 +1,12 @@
+# Keep Railway/Docker context small — only backend is deployed from this image
+.git
+.github
+frontend
+**/.env
+**/.env.*
+!.env.example
+node_modules
+frontend/node_modules
+backend/node_modules
+*.md
+firestore.indexes.json

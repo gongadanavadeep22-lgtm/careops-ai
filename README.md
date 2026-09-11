@@ -82,10 +82,21 @@ See [backend/.env.example](backend/.env.example) and [frontend/.env.example](fro
 
 **Production:** set `VITE_*` on Vercel (redeploy after changes). Set backend vars on Railway. Set `ALLOWED_ORIGIN` to your Vercel URL.
 
+### Railway (backend only)
+
+This repo is a **monorepo**. There is **no** `package.json` at the repo root. The API lives in `backend/`.
+
+**Preferred:** Service → **Settings** → **Source** → **Root Directory** = `backend`  
+Then Railpack sees `backend/package.json` and `backend/railway.toml`.
+
+**If Root Directory is left empty:** the root [`Dockerfile`](Dockerfile) builds only `backend/` so Railpack still has a provider.
+
+Do **not** set `PORT` in Railway Variables. Railway injects `PORT`; overriding it (e.g. `4000`) makes health checks miss the process.
+
 ### Production deploy checklist (Phase 8)
 
-1. **Railway** — redeploy backend; confirm `/health` returns `ok`. Set `FIREBASE_SERVICE_ACCOUNT_JSON`, optional `GEMINI_API_KEY`, Twilio vars, `ALLOWED_ORIGIN=https://careops-ai-gamma.vercel.app`.
-2. **Vercel** — set `VITE_API_URL` to Railway URL; redeploy after env changes.
+1. **Railway** — deploy `backend` as above; confirm `/health` returns `ok`. Set `FIREBASE_SERVICE_ACCOUNT_JSON`, `FIREBASE_STORAGE_BUCKET`, `ALLOWED_ORIGIN=https://careops-ai-gamma.vercel.app`. Optional: `GEMINI_API_KEY`, Twilio vars, `FIREBASE_DATABASE_URL`.
+2. **Vercel** — set `VITE_API_URL` to the new Railway URL (no trailing slash); redeploy after env changes.
 3. **Firebase Console** — add Vercel domain to Authorized domains; Email/Password auth enabled.
 4. **Smoke test** — login all 5 roles, run E2E checklist above against production.
 
