@@ -1,3 +1,6 @@
 # Use modern omit flag (avoids npm WARN: config production — use --omit=dev instead)
+[variables]
+NIXPACKS_NODE_VERSION = "20"
+
 [phases.install]
 cmds = ["npm ci --omit=dev"]

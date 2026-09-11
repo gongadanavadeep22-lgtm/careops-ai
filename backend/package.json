@@ -4,13 +4,13 @@
   "description": "CareOps AI — Express + Firebase Admin backend",
   "main": "index.js",
   "scripts": {
-    "start": "node --disable-warning=DEP0040 index.js",
+    "start": "node index.js",
     "dev": "nodemon index.js",
     "test": "node --test",
     "audit:latency": "node scripts/latency-audit.js"
   },
   "engines": {
-    "node": ">=18"
+    "node": "20.x"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
