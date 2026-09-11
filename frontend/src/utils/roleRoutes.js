@@ -4,6 +4,7 @@ export const ROLE_ROUTES = {
   doctor: '/doctor',
   pharmacist: '/pharmacy',
   ops: '/ops',
+  admin: '/ops',
   patient: '/patient',
 };
 

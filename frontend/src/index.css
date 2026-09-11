@@ -16,3 +16,12 @@
 body {
   background-color: #f0f4f8;
 }
+
+/* 16px minimum on form controls — prevents iOS Safari auto-zoom */
+@layer base {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}

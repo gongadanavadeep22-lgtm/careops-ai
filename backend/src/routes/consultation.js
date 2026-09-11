@@ -78,6 +78,7 @@ router.post('/soap', verifyToken, ...authRoles('doctor'), async (req, res, next)
       prescription: result.prescription || [],
       healthTips: result.healthTips || [],
       prescriptionValidation,
+      voiceTranscript: String(transcript || '').trim(),
     });
 
     res.json({
@@ -139,17 +140,28 @@ router.post('/panel', verifyToken, ...authRoles('doctor'), async (req, res, next
       pastVisits,
       consultationTranscript: typeof consultationTranscript === 'string' ? consultationTranscript.trim() : '',
     });
-    if (!Array.isArray(insights) || insights.length === 0) {
-      insights = [
-        'Review patient history carefully',
-        'Check current vitals',
-        'Consider allergies before prescribing',
-      ];
-    }
+    if (!Array.isArray(insights)) insights = [];
+    insights = insights.map((x) => (typeof x === 'string' ? x.trim() : '')).filter(Boolean).slice(0, 3);
 
     await db.collection('visits').doc(visitId).update({ decisionPanel: insights });
 
     res.json({ success: true, insights });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/consultation/transcript — persist notes if Gemini fails or doctor refreshes
+router.post('/transcript', verifyToken, ...authRoles('doctor'), async (req, res, next) => {
+  try {
+    const { visitId, transcript } = req.body;
+    if (!visitId) {
+      return res.status(400).json({ error: 'visitId is required' });
+    }
+    await db.collection('visits').doc(visitId).update({
+      voiceTranscript: String(transcript || '').trim(),
+    });
+    res.json({ success: true });
   } catch (err) {
     next(err);
   }

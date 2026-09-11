@@ -7,6 +7,7 @@ describe('dashboardPathForRole', () => {
     expect(dashboardPathForRole('nurse')).toBe('/nurse');
     expect(dashboardPathForRole('pharmacist')).toBe('/pharmacy');
     expect(dashboardPathForRole('ops')).toBe('/ops');
+    expect(dashboardPathForRole('admin')).toBe('/ops');
     expect(dashboardPathForRole('patient')).toBe('/patient');
   });
 
@@ -15,7 +16,7 @@ describe('dashboardPathForRole', () => {
   });
 
   it('falls back to /login for unknown roles', () => {
-    expect(dashboardPathForRole('admin')).toBe('/login');
+    expect(dashboardPathForRole('unknown')).toBe('/login');
     expect(dashboardPathForRole('')).toBe('/login');
     expect(dashboardPathForRole(null)).toBe('/login');
   });

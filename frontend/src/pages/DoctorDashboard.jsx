@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
-import { collection, query, where, onSnapshot, limit } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, limit, doc } from 'firebase/firestore';
 import { getFirestoreDb } from '../firebase/config';
 import client from '../api/client';
 import Layout from '../components/Layout';
@@ -110,6 +110,7 @@ export default function DoctorDashboard() {
   const [patient, setPatient] = useState(null);
   const [caseLoading, setCaseLoading] = useState(false);
   const [caseError, setCaseError] = useState('');
+  const [pastVisits, setPastVisits] = useState([]);
 
   const [decisionPanel, setDecisionPanel] = useState([]);
   const [panelLoading, setPanelLoading] = useState(false);
@@ -172,6 +173,16 @@ export default function DoctorDashboard() {
 
     return () => unsubscribe();
   }, [clinicId]);
+
+  useEffect(() => {
+    if (!visit?.id) return undefined;
+    const unsub = onSnapshot(doc(db, 'visits', visit.id), (snap) => {
+      if (!snap.exists()) return;
+      const vitals = snap.data().vitals || {};
+      setVisit((prev) => (prev && prev.id === snap.id ? { ...prev, vitals } : prev));
+    });
+    return () => unsub();
+  }, [visit?.id, db]);
 
   // Note: do not sync decisionPanel from Firestore onSnapshot — it races the /panel API
   // and often wipes insights right after a successful response.
@@ -249,6 +260,9 @@ export default function DoctorDashboard() {
       recognitionRef.current = null;
     }
     setRecording(false);
+    if (visit?.id && transcript.trim()) {
+      client.post('/api/consultation/transcript', { visitId: visit.id, transcript: transcript.trim() }).catch(() => {});
+    }
   }
 
   // ── LOAD PATIENT CASE ──
@@ -266,6 +280,7 @@ export default function DoctorDashboard() {
     setTranscript('');
     setDecisionPanel([]);
     setCaseError('');
+    setPastVisits([]);
     setPanelError('');
     setCaseLoading(true);
     setPanelLoading(true);
@@ -275,6 +290,9 @@ export default function DoctorDashboard() {
       const visitRes = await client.get(`/api/visits/by-appointment?appointmentId=${appt.id}`);
       const loadedVisit = visitRes.data.visit;
       setVisit(loadedVisit);
+      if (String(loadedVisit.voiceTranscript || '').trim()) {
+        setTranscript(String(loadedVisit.voiceTranscript).trim());
+      }
 
       // Restore SOAP / prescription if doctor reopens this case
       const sn = loadedVisit.soapNote || {};
@@ -302,6 +320,14 @@ export default function DoctorDashboard() {
           setPatient(patientRes.data.patient);
         } catch {
           setPatient(null);
+        }
+        try {
+          const hist = await client.get('/api/visits/history', {
+            params: { patientId: appt.patientId, excludeVisitId: loadedVisit.id },
+          });
+          setPastVisits(hist.data.visits || []);
+        } catch {
+          setPastVisits([]);
         }
       }
 
@@ -582,6 +608,24 @@ export default function DoctorDashboard() {
                     <p className="text-xs font-semibold text-gray-500 uppercase mb-1">{t('doctor.symptomsToday')}</p>
                     <p className="text-sm text-gray-800">{visit?.symptoms || '—'}</p>
                   </div>
+
+                  {pastVisits.length > 0 && (
+                    <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm">
+                      <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Last visits</p>
+                      <ul className="space-y-2">
+                        {pastVisits.map((v) => (
+                          <li key={v.id} className="text-xs text-gray-700 border-b border-gray-50 pb-2 last:border-0 last:pb-0">
+                            <span className="font-medium text-gray-900">
+                              {v.date ? new Date(v.date).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' }) : '—'}
+                            </span>
+                            {v.urgency ? ` · ${v.urgency}` : ''}
+                            {v.symptoms ? ` — ${v.symptoms}` : ''}
+                            {v.assessment ? <span className="block text-gray-500 mt-0.5">{v.assessment}</span> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
 
                   <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
                     <h3 className="text-sm font-semibold text-gray-900">{t('doctor.consultationNotes')}</h3>
@@ -878,16 +922,6 @@ export default function DoctorDashboard() {
                           </div>
                         );
                       })}
-                      {decisionPanel.length > 3 && (
-                        <div className="space-y-2 pt-1 border-t border-gray-100">
-                          <p className="text-[10px] font-semibold text-gray-400 uppercase">{t('doctor.more')}</p>
-                          {decisionPanel.slice(3).map((insight, i) => (
-                            <div key={`extra-${i}`} className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                              {insightToString(insight)}
-                            </div>
-                          ))}
-                        </div>
-                      )}
                     </div>
                   )}
                 </>

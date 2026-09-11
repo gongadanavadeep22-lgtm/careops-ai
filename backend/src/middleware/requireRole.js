@@ -37,10 +37,12 @@ async function loadUserProfile(req, res, next) {
       return next();
     }
     const data = doc.data();
+    let role = String(data.role || '').trim().toLowerCase();
+    if (role === 'admin') role = 'ops';
     req.userProfile = {
       uid: req.user.uid,
       name: data.name || '',
-      role: String(data.role || '').trim().toLowerCase(),
+      role,
       clinicId: data.clinicId || DEFAULT_CLINIC_ID,
     };
     next();

@@ -30,6 +30,9 @@ router.post('/book', verifyToken, ...authRoles('patient', 'nurse', 'ops'), async
     if (!patientName || !doctorId || !doctorName || !scheduledAt || !symptoms) {
       return res.status(400).json({ error: 'Missing required fields' });
     }
+    if (String(symptoms).trim().length < 10) {
+      return res.status(400).json({ error: 'Please describe symptoms (minimum 10 characters).' });
+    }
 
     const clinicId = getClinicId(req);
     const appointmentData = {

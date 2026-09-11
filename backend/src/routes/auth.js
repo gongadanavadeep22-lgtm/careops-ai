@@ -34,8 +34,9 @@ router.get('/me', verifyToken, async (req, res, next) => {
     }
 
     const { name, role, clinicId } = doc.data();
+    const normalizedRole = String(role || '').trim().toLowerCase() === 'admin' ? 'ops' : role;
 
-    res.json({ uid, name, role, clinicId: clinicId || 'clinic-001' });
+    res.json({ uid, name, role: normalizedRole, clinicId: clinicId || 'clinic-001' });
   } catch (err) {
     next(err);
   }

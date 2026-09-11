@@ -128,6 +128,10 @@ export default function BookAppointmentForm({ onSuccess }) {
     e.preventDefault();
     setStatus('');
     setError('');
+    if (form.symptoms.trim().length < 10) {
+      setError('Please describe symptoms (minimum 10 characters).');
+      return;
+    }
     setLoading(true);
     const selectedDoctor = doctors.find((d) => d.id === form.doctorId);
     try {
