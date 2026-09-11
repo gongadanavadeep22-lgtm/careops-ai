@@ -13,4 +13,4 @@ COPY backend/ ./
 
 ENV NODE_ENV=production
 
-CMD ["npm", "run", "start"]
+CMD ["node", "index.js"]
