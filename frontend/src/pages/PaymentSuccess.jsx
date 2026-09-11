@@ -1,9 +1,16 @@
 import { CheckCircle2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import LanguageSwitcher from '../components/LanguageSwitcher';
+
+function formatInr(n) {
+  return `₹${Number(n).toLocaleString('en-IN')}`;
+}
 
 export default function PaymentSuccess() {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
+  const amount = searchParams.get('amount');
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#f0f4f8] px-4 py-10">
@@ -19,6 +26,11 @@ export default function PaymentSuccess() {
         <div>
           <h1 className="text-3xl font-bold text-gray-900">{t('paymentSuccess.title')}</h1>
           <p className="mt-2 text-sm text-gray-500">{t('paymentSuccess.subtitle')}</p>
+          {amount && !Number.isNaN(Number(amount)) && (
+            <p className="mt-3 text-lg font-semibold text-green-700">
+              {t('paymentSuccess.paidAmount', { amount: formatInr(amount) })}
+            </p>
+          )}
         </div>
 
         <div className="mt-6 rounded-xl border border-green-200 bg-green-50 px-5 py-4">

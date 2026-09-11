@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node --disable-warning=DEP0040 index.js",
     "dev": "nodemon index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "audit:latency": "node scripts/latency-audit.js"
   },
   "engines": {
     "node": ">=18"

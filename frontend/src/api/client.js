@@ -13,6 +13,7 @@ if (import.meta.env.PROD && !baseURL) {
 
 const client = axios.create({
   baseURL: baseURL || undefined,
+  timeout: 30000,
 });
 
 client.interceptors.request.use(async (config) => {

@@ -25,8 +25,18 @@ describe('Gemini service', () => {
       conditions: '',
       allergies: '',
     });
+    assert.strictEqual(result.urgency, 'EMERGENCY');
+    assert.strictEqual(result.department, 'Emergency');
+  });
+
+  it('classifyUrgency uses keyword triage without API key', async () => {
+    const { classifyUrgency } = require('../src/services/gemini');
+    const result = await classifyUrgency({
+      symptoms: 'mild cough',
+      age: '30',
+      conditions: '',
+      allergies: '',
+    });
     assert.strictEqual(result.urgency, 'GENERAL');
-    assert.strictEqual(result.department, 'General');
-    assert.match(result.reason, /unavailable/i);
   });
 });

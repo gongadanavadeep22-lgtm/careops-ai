@@ -52,7 +52,11 @@ router.get('/history', verifyToken, ...authRoles('doctor', 'nurse'), async (req,
       return res.status(400).json({ error: 'patientId query param is required' });
     }
 
-    const snapshot = await db.collection('visits').where('patientId', '==', patientId).get();
+    const snapshot = await db
+      .collection('visits')
+      .where('patientId', '==', patientId)
+      .limit(20)
+      .get();
     const visits = snapshot.docs
       .map((doc) => {
         const data = doc.data();

@@ -7,17 +7,70 @@ import client from '../api/client';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import { useAuth } from '../hooks/useAuth';
+import { buildPharmacyPickupWhatsAppMessage } from '../utils/prescriptionWhatsApp';
 
+function structuredMedicinesToFlat(medicines) {
+  if (!Array.isArray(medicines)) return [];
+  return medicines
+    .map((m) => {
+      if (typeof m === 'string') return m.trim();
+      if (!m || typeof m !== 'object') return '';
+      const parts = [
+        m.name,
+        m.recommendedDosage || m.dosage || m.strength,
+        m.frequency,
+        m.usualDuration || m.duration,
+      ].filter(Boolean);
+      return parts.join(' — ').trim() || String(m.name || '').trim();
+    })
+    .filter(Boolean);
+}
+
+/** Prescribed lines: prescription array, then selectedMedicines, else SOAP plan. */
 function medicinesForVisit(visit) {
   const rx = visit?.prescription;
   if (Array.isArray(rx) && rx.length > 0) {
     return rx.map((m) => (typeof m === 'string' ? m : m?.name || String(m))).filter(Boolean);
+  }
+  const selected = visit?.selectedMedicines;
+  if (Array.isArray(selected) && selected.length > 0) {
+    return structuredMedicinesToFlat(selected);
   }
   const plan = visit?.soapNote?.plan;
   if (plan && String(plan).trim()) {
     return [String(plan).trim()];
   }
   return [];
+}
+
+function diseasesForVisit(visit) {
+  const raw = visit?.selectedDiseases;
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((d) => {
+      if (typeof d === 'string') return { id: d, name: d };
+      if (!d || typeof d !== 'object') return null;
+      const id = String(d.id || d.name || '').trim();
+      const name = String(d.name || d.id || '').trim();
+      if (!id && !name) return null;
+      return { id: id || name, name: name || id };
+    })
+    .filter(Boolean);
+}
+
+function prescriptionLetterForVisit(visit) {
+  const letter = visit?.prescriptionLetter;
+  return letter && String(letter).trim() ? String(letter).trim() : '';
+}
+
+/** True when medicines list would come only from SOAP plan (no structured rx). */
+function medicinesFromSoapOnly(visit) {
+  const rx = visit?.prescription;
+  if (Array.isArray(rx) && rx.length > 0) return false;
+  const selected = visit?.selectedMedicines;
+  if (Array.isArray(selected) && selected.length > 0) return false;
+  const plan = visit?.soapNote?.plan;
+  return Boolean(plan && String(plan).trim());
 }
 
 function timeAgo(dateStr) {
@@ -62,15 +115,6 @@ function phoneDigitsForWaMe(phoneRaw) {
   return d;
 }
 
-function buildPharmacyWhatsAppDeepLinkMessage(t, patientName, medicineNames, billLabel) {
-  const name = (patientName && String(patientName).trim()) || 'there';
-  const meds =
-    Array.isArray(medicineNames) && medicineNames.length > 0
-      ? medicineNames.join(', ')
-      : t('pharmacy.medsFallback');
-  return t('pharmacy.whatsappBody', { name, meds, bill: billLabel });
-}
-
 function openWhatsAppWaMePrefilled(phoneDigits, text) {
   if (!phoneDigits) return;
   const url = `https://wa.me/${phoneDigits}?text=${encodeURIComponent(text)}`;
@@ -78,12 +122,15 @@ function openWhatsAppWaMePrefilled(phoneDigits, text) {
 }
 
 /** Queue card / quick demo: uses phone on the visit row only (not patient profile). */
-function openWaMeFromVisit(visit, t) {
+function openWaMeFromVisit(visit) {
   const digits = phoneDigitsForWaMe(phoneOnVisit(visit));
   if (!digits) return;
-  const meds = medicinesForVisit(visit);
   const billN = amountForVisit(visit) ?? 1000;
-  const msg = buildPharmacyWhatsAppDeepLinkMessage(t, visit.patientName, meds, formatAmountInr(billN));
+  const msg = buildPharmacyPickupWhatsAppMessage({
+    patientName: visit.patientName,
+    visit,
+    billLabel: formatAmountInr(billN),
+  });
   openWhatsAppWaMePrefilled(digits, msg);
 }
 
@@ -107,6 +154,7 @@ export default function PharmacyDashboard() {
   /** 'success' | 'warning' — warning when marked ready but WhatsApp did not send */
   const [readyTone, setReadyTone] = useState('success');
   const [readyError, setReadyError] = useState('');
+  const [lastPayUrl, setLastPayUrl] = useState('');
 
   // ── ACTIVE PRESCRIPTIONS (confirmed) via onSnapshot ──
   useEffect(() => {
@@ -162,6 +210,7 @@ export default function PharmacyDashboard() {
     setReadyStatus('');
     setReadyTone('success');
     setReadyError('');
+    setLastPayUrl('');
     setPhoneLoading(true);
 
     if (visit.patientId) {
@@ -183,14 +232,17 @@ export default function PharmacyDashboard() {
     if (!selectedVisit) return;
     const digits = phoneDigitsForWaMe(patientPhone);
     if (!digits) return;
-    const meds = medicinesForVisit(selectedVisit);
     const billN = amountForVisit(selectedVisit) ?? 1000;
-    const msg = buildPharmacyWhatsAppDeepLinkMessage(
-      t,
-      selectedVisit.patientName,
-      meds,
-      formatAmountInr(billN)
+    const appUrl = String(import.meta.env.VITE_PUBLIC_APP_URL || window.location.origin).replace(
+      /\/$/,
+      ''
     );
+    const msg = buildPharmacyPickupWhatsAppMessage({
+      patientName: selectedVisit.patientName,
+      visit: selectedVisit,
+      billLabel: formatAmountInr(billN),
+      payUrl: `${appUrl}/payment-success?amount=${billN}`,
+    });
     openWhatsAppWaMePrefilled(digits, msg);
   }
 
@@ -200,9 +252,11 @@ export default function PharmacyDashboard() {
     setReadyStatus('');
     setReadyTone('success');
     setReadyError('');
+    setLastPayUrl('');
 
     try {
       const { data } = await client.post('/api/pharmacy/ready', { visitId: selectedVisit.id });
+      if (data.payUrl) setLastPayUrl(String(data.payUrl));
       const sent =
         data.whatsappSent === true ||
         (data.whatsappSent == null && !data.warning);
@@ -224,18 +278,16 @@ export default function PharmacyDashboard() {
       }
 
       const waDigits = phoneDigitsForWaMe(patientPhone);
-      if (waDigits) {
-        const meds = medicinesForVisit(selectedVisit);
+      if (waDigits && !sent) {
         const billN =
           data.totalAmount != null && !Number.isNaN(Number(data.totalAmount))
             ? Number(data.totalAmount)
             : amountForVisit(selectedVisit) ?? 1000;
-        const msg = buildPharmacyWhatsAppDeepLinkMessage(
-          t,
-          selectedVisit.patientName,
-          meds,
-          formatAmountInr(billN)
-        );
+        const msg = buildPharmacyPickupWhatsAppMessage({
+          patientName: selectedVisit.patientName,
+          visit: selectedVisit,
+          billLabel: formatAmountInr(billN),
+        });
         openWhatsAppWaMePrefilled(waDigits, msg);
       }
 
@@ -277,6 +329,11 @@ export default function PharmacyDashboard() {
             <div className="space-y-4">
               {active.map((visit) => {
                 const visitAmount = amountForVisit(visit);
+                const visitDiseases = diseasesForVisit(visit);
+                const visitLetter = prescriptionLetterForVisit(visit);
+                const visitMeds = medicinesForVisit(visit);
+                const hideSoapMeds = visitLetter && medicinesFromSoapOnly(visit);
+                const showMeds = visitMeds.length > 0 && !hideSoapMeds;
                 return (
                 <div key={visit.id}>
                   <div
@@ -295,9 +352,21 @@ export default function PharmacyDashboard() {
                               {t('pharmacy.confirmed')} {timeAgo(visit.createdAt)}
                             </span>
                             <span className="text-xs bg-blue-100 text-blue-600 px-2 py-0.5 rounded-full">
-                              {t('pharmacy.medicinesCount', { count: medicinesForVisit(visit).length })}
+                              {t('pharmacy.medicinesCount', { count: visitMeds.length })}
                             </span>
                           </div>
+                          {visitDiseases.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-1">
+                              {visitDiseases.map((d) => (
+                                <span
+                                  key={d.id}
+                                  className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-medium text-indigo-800"
+                                >
+                                  {d.name}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           <p className="text-xs text-gray-600 mt-1">
                             <span className="font-medium text-gray-700">{t('pharmacy.phoneLabel')}</span>{' '}
                             {phoneOnVisit(visit) ? (
@@ -320,7 +389,7 @@ export default function PharmacyDashboard() {
                             : t('pharmacy.whatsappDisabledTitle')
                         }
                         disabled={!phoneDigitsForWaMe(phoneOnVisit(visit))}
-                        onClick={() => openWaMeFromVisit(visit, t)}
+                        onClick={() => openWaMeFromVisit(visit)}
                         className="rounded-lg bg-[#25D366] px-2 py-2 text-center text-[11px] font-bold leading-tight text-white shadow-sm transition hover:bg-[#20bd5a] disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
                       >
                         {t('pharmacy.whatsapp')}
@@ -359,22 +428,63 @@ export default function PharmacyDashboard() {
                         </div>
                       </div>
 
-                      {/* Medicines */}
-                      <div>
-                        <p className="text-xs text-gray-500 font-medium uppercase mb-2">{t('pharmacy.prescribedMeds')}</p>
-                        {medicinesForVisit(visit).length > 0 ? (
+                      {/* Diagnoses */}
+                      {visitDiseases.length > 0 && (
+                        <div>
+                          <p className="text-xs text-gray-500 font-medium uppercase mb-2">{t('pharmacy.diseases')}</p>
+                          <div className="flex flex-wrap gap-2">
+                            {visitDiseases.map((d) => (
+                              <span
+                                key={d.id}
+                                className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-0.5 text-xs font-medium text-indigo-800"
+                              >
+                                {d.name}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Prescription letter (primary) */}
+                      {visitLetter && (
+                        <div>
+                          <p className="text-xs text-gray-500 font-medium uppercase mb-2">{t('pharmacy.prescriptionLetter')}</p>
+                          <pre className="whitespace-pre-wrap rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-relaxed text-gray-800 font-sans">
+                            {visitLetter}
+                          </pre>
+                        </div>
+                      )}
+
+                      {/* Medicines — de-emphasized when prescription letter is present */}
+                      {showMeds && (
+                        <div className={visitLetter ? 'opacity-75' : ''}>
+                          <p
+                            className={`text-xs font-medium uppercase mb-2 ${visitLetter ? 'text-gray-400' : 'text-gray-500'}`}
+                          >
+                            {t('pharmacy.prescribedMeds')}
+                          </p>
                           <ul className="space-y-2">
-                            {medicinesForVisit(visit).map((med, i) => (
-                              <li key={i} className="flex items-center gap-2 bg-blue-50 rounded-lg px-3 py-2">
-                                <span className="text-blue-500 font-bold">{i + 1}.</span>
-                                <span className="text-sm text-gray-800 font-medium">{med}</span>
+                            {visitMeds.map((med, i) => (
+                              <li
+                                key={i}
+                                className={`flex items-center gap-2 rounded-lg px-3 py-2 ${
+                                  visitLetter ? 'bg-gray-50' : 'bg-blue-50'
+                                }`}
+                              >
+                                <span className={`font-bold ${visitLetter ? 'text-gray-400' : 'text-blue-500'}`}>
+                                  {i + 1}.
+                                </span>
+                                <span className={`text-sm font-medium ${visitLetter ? 'text-gray-600' : 'text-gray-800'}`}>
+                                  {med}
+                                </span>
                               </li>
                             ))}
                           </ul>
-                        ) : (
-                          <p className="text-sm text-gray-400">{t('pharmacy.noMeds')}</p>
-                        )}
-                      </div>
+                        </div>
+                      )}
+                      {!visitLetter && !showMeds && (
+                        <p className="text-sm text-gray-400">{t('pharmacy.noMeds')}</p>
+                      )}
 
                       {/* Total Amount — only when visit has an amount */}
                       {visitAmount != null && (
@@ -428,6 +538,28 @@ export default function PharmacyDashboard() {
                           {readyStatus}
                         </p>
                       )}
+                      {lastPayUrl && (
+                        <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-3 text-left">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-blue-800">
+                            {t('pharmacy.payLinkLabel')}
+                          </p>
+                          <a
+                            href={lastPayUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-1 block break-all text-sm font-medium text-blue-700 underline"
+                          >
+                            {lastPayUrl}
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => navigator.clipboard?.writeText(lastPayUrl)}
+                            className="mt-2 text-xs font-semibold text-blue-700 hover:underline"
+                          >
+                            {t('pharmacy.copyPayLink')}
+                          </button>
+                        </div>
+                      )}
                       {readyError && (
                         <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
                           {readyError}
@@ -466,6 +598,11 @@ export default function PharmacyDashboard() {
             <div className="space-y-3">
               {completed.map((visit) => {
                 const visitAmount = amountForVisit(visit);
+                const visitDiseases = diseasesForVisit(visit);
+                const visitLetter = prescriptionLetterForVisit(visit);
+                const visitMeds = medicinesForVisit(visit);
+                const hideSoapMeds = visitLetter && medicinesFromSoapOnly(visit);
+                const showMeds = visitMeds.length > 0 && !hideSoapMeds;
                 return (
                 <div
                   key={visit.id}
@@ -485,9 +622,24 @@ export default function PharmacyDashboard() {
                           {t('pharmacy.dispensed')}
                         </span>
                       </div>
-                      {medicinesForVisit(visit).length > 0 && (
-                        <ul className="space-y-0.5">
-                          {medicinesForVisit(visit).map((med, i) => (
+                      {visitDiseases.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {visitDiseases.map((d) => (
+                            <span
+                              key={d.id}
+                              className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-medium text-gray-600"
+                            >
+                              {d.name}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {visitLetter && (
+                        <p className="mt-1 line-clamp-2 text-xs text-gray-500 whitespace-pre-wrap">{visitLetter}</p>
+                      )}
+                      {showMeds && (
+                        <ul className="mt-1 space-y-0.5">
+                          {visitMeds.map((med, i) => (
                             <li key={i} className="flex items-start gap-1 text-xs text-gray-500">
                               <span className="text-gray-400">•</span> {med}
                             </li>

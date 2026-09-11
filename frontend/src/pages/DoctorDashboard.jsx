@@ -1,42 +1,31 @@
-import { useState, useEffect, useRef } from 'react';
-import { useTranslation, Trans } from 'react-i18next';
+import { useState, useEffect, useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 import { collection, query, where, onSnapshot, limit, doc } from 'firebase/firestore';
 import { getFirestoreDb } from '../firebase/config';
 import client from '../api/client';
 import Layout from '../components/Layout';
 import EmergencyBanner from '../components/EmergencyBanner';
 import { useAuth } from '../hooks/useAuth';
-import { normalizeInsights, insightToString, tipToString } from '../utils/clinicalText';
 import {
   Loader2,
   Stethoscope,
-  Sparkles,
-  AlertTriangle,
-  BarChart3,
-  Shield,
+  AlertCircle,
   Heart,
   Thermometer,
   Activity,
-  Mic,
-  AlertCircle,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 
 const URGENCY_ORDER = { EMERGENCY: 0, PRIORITY: 1, GENERAL: 2 };
 
-function hasSoapContent(sn) {
-  if (!sn || typeof sn !== 'object') return false;
-  return ['subjective', 'objective', 'assessment', 'plan'].some(
-    (k) => String(sn[k] ?? '').trim().length > 0
-  );
-}
-
-/** Match backend medicinesForVisit: list for approve / UI */
-function medicinesFromState(soapNote, prescription) {
-  if (Array.isArray(prescription) && prescription.length > 0) return prescription;
-  const plan = soapNote?.plan;
-  if (plan && String(plan).trim()) return [String(plan).trim()];
-  return [];
-}
+const EMPTY_MEDICINE = {
+  name: '',
+  recommendedDosage: '',
+  frequency: '',
+  usualDuration: '',
+  notes: '',
+};
 
 function urgencyBorderColor(urgency) {
   if (urgency === 'EMERGENCY') return 'border-l-4 border-red-500';
@@ -63,18 +52,27 @@ function patientInitial(name) {
   return s ? s[0].toUpperCase() : '?';
 }
 
-/** BCP-47 tag for Web Speech API — match UI language for better recognition. */
-function speechRecognitionLang(i18nLang) {
-  const base = String(i18nLang || 'en').split('-')[0];
-  const map = { en: 'en-US', hi: 'hi-IN', te: 'te-IN', ta: 'ta-IN' };
-  return map[base] || 'en-US';
-}
-
 function urgencyLabel(urgency, t) {
   const u = String(urgency || 'GENERAL').toUpperCase();
   if (u === 'EMERGENCY') return t('doctor.urgencyEmergency');
   if (u === 'PRIORITY') return t('doctor.urgencyPriority');
   return t('doctor.urgencyGeneral');
+}
+
+function mergeMedicinesClient(catalog, diseaseIds) {
+  if (!Array.isArray(diseaseIds) || !Array.isArray(catalog)) return [];
+  const seen = new Map();
+  for (const id of diseaseIds) {
+    const disease = catalog.find((d) => d.id === id);
+    if (!disease) continue;
+    for (const medicine of disease.medicines || []) {
+      const key = String(medicine.name || '').toLowerCase();
+      if (key && !seen.has(key)) {
+        seen.set(key, { ...medicine });
+      }
+    }
+  }
+  return Array.from(seen.values());
 }
 
 function WaitTime({ createdAt }) {
@@ -97,7 +95,7 @@ function WaitTime({ createdAt }) {
 }
 
 export default function DoctorDashboard() {
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
   const { user } = useAuth();
   const clinicId = user?.clinicId || 'clinic-001';
   const db = getFirestoreDb();
@@ -112,42 +110,44 @@ export default function DoctorDashboard() {
   const [caseError, setCaseError] = useState('');
   const [pastVisits, setPastVisits] = useState([]);
 
-  const [decisionPanel, setDecisionPanel] = useState([]);
-  const [panelLoading, setPanelLoading] = useState(false);
-  const [panelError, setPanelError] = useState('');
+  const [diseases, setDiseases] = useState([]);
+  const [diseasesLoading, setDiseasesLoading] = useState(true);
+  const [diseasesError, setDiseasesError] = useState('');
+  const [diseaseSearch, setDiseaseSearch] = useState('');
+  const [selectedDiseaseIds, setSelectedDiseaseIds] = useState([]);
+  const [medicines, setMedicines] = useState([]);
+  const [medicinesLoading, setMedicinesLoading] = useState(false);
 
-  // Voice / transcript
-  const [transcript, setTranscript] = useState('');
-  const [recording, setRecording] = useState(false);
-  const [speechSupported, setSpeechSupported] = useState(false);
-  const [speechError, setSpeechError] = useState('');
-  const recognitionRef = useRef(null);
-  const recordingIntentRef = useRef(false);
-  const panelRequestRef = useRef(0);
+  const [prescriptionLetter, setPrescriptionLetter] = useState('');
+  const [generateLoading, setGenerateLoading] = useState(false);
+  const [generateError, setGenerateError] = useState('');
 
-  // SOAP
-  const [soapLoading, setSoapLoading] = useState(false);
-  const [soapNote, setSoapNote] = useState(null);
-  const [prescription, setPrescription] = useState([]);
-  const [healthTips, setHealthTips] = useState([]);
-  const [prescriptionValidation, setPrescriptionValidation] = useState(null);
-  const [soapError, setSoapError] = useState('');
-
-  // Confirm
+  const [sendWhatsAppToPatient, setSendWhatsAppToPatient] = useState(false);
   const [confirmLoading, setConfirmLoading] = useState(false);
   const [confirmStatus, setConfirmStatus] = useState('');
   const [confirmOutcome, setConfirmOutcome] = useState(null);
-  const [speechInsecureHint, setSpeechInsecureHint] = useState(false);
-  const [aiConfigured, setAiConfigured] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+    setDiseasesLoading(true);
+    setDiseasesError('');
     client
-      .get('/health')
-      .then(({ data }) => setAiConfigured(Boolean(data.geminiKeySet)))
-      .catch(() => setAiConfigured(false));
-  }, []);
+      .get('/api/diseases')
+      .then(({ data }) => {
+        if (cancelled) return;
+        setDiseases(Array.isArray(data.diseases) ? data.diseases : data || []);
+      })
+      .catch(() => {
+        if (!cancelled) setDiseasesError(t('doctor.diseasesLoadFailed'));
+      })
+      .finally(() => {
+        if (!cancelled) setDiseasesLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [t]);
 
-  // ── LIVE QUEUE via onSnapshot ──
   useEffect(() => {
     const q = query(
       collection(db, 'appointments'),
@@ -172,7 +172,7 @@ export default function DoctorDashboard() {
     }, () => setQueueLoading(false));
 
     return () => unsubscribe();
-  }, [clinicId]);
+  }, [clinicId, db]);
 
   useEffect(() => {
     if (!visit?.id) return undefined;
@@ -184,235 +184,173 @@ export default function DoctorDashboard() {
     return () => unsub();
   }, [visit?.id, db]);
 
-  // Note: do not sync decisionPanel from Firestore onSnapshot — it races the /panel API
-  // and often wipes insights right after a successful response.
-
-  // ── SPEECH RECOGNITION ──
-  useEffect(() => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    setSpeechSupported(!!SR);
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const h = window.location.hostname;
-    const localhost = h === 'localhost' || h === '127.0.0.1';
-    setSpeechInsecureHint(!window.isSecureContext && !localhost);
-  }, []);
-
-  function startRecording() {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) return;
-    setSpeechError('');
-    const recognition = new SR();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = speechRecognitionLang(i18n.language);
-    recognition.onresult = (e) => {
-      let full = '';
-      for (let i = 0; i < e.results.length; i++) {
-        full += `${e.results[i][0].transcript} `;
+  const mergeMedicines = useCallback(
+    async (diseaseIds) => {
+      if (!diseaseIds.length) {
+        setMedicines([]);
+        return;
       }
-      setTranscript(full.trim());
-    };
-    recognition.onerror = (event) => {
-      if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
-        setSpeechError(t('doctor.speechDenied'));
-      } else if (event.error === 'network') {
-        setSpeechError(t('doctor.speechNetwork'));
-      } else if (event.error === 'audio-capture') {
-        setSpeechError(t('doctor.speechNoMic'));
-      } else if (event.error !== 'no-speech' && event.error !== 'aborted') {
-        setSpeechError(t('doctor.speechGeneric', { code: event.error }));
-      }
-    };
-    recognition.onend = () => {
-      if (recordingIntentRef.current && recognitionRef.current === recognition) {
-        try {
-          recognition.start();
-        } catch {
-          /* already running or stopped */
-        }
-      }
-    };
-    recordingIntentRef.current = true;
-    try {
-      recognition.start();
-      recognitionRef.current = recognition;
-      setRecording(true);
-    } catch (err) {
-      recordingIntentRef.current = false;
-      recognitionRef.current = null;
-      setRecording(false);
-      // eslint-disable-next-line no-console
-      console.warn('[speech] start failed', err);
-    }
-  }
-
-  function stopRecording() {
-    recordingIntentRef.current = false;
-    if (recognitionRef.current) {
+      setMedicinesLoading(true);
       try {
-        recognitionRef.current.stop();
+        const { data } = await client.post('/api/diseases/merge-medicines', {
+          diseaseIds,
+        });
+        const merged = Array.isArray(data.medicines) ? data.medicines : data;
+        setMedicines(merged.length ? merged : mergeMedicinesClient(diseases, diseaseIds));
       } catch {
-        /* ignore */
+        setMedicines(mergeMedicinesClient(diseases, diseaseIds));
+      } finally {
+        setMedicinesLoading(false);
       }
-      recognitionRef.current = null;
-    }
-    setRecording(false);
-    if (visit?.id && transcript.trim()) {
-      client.post('/api/consultation/transcript', { visitId: visit.id, transcript: transcript.trim() }).catch(() => {});
-    }
+    },
+    [diseases]
+  );
+
+  function resetPrescriptionState() {
+    setSelectedDiseaseIds([]);
+    setMedicines([]);
+    setPrescriptionLetter('');
+    setDiseaseSearch('');
+    setGenerateError('');
+    setSendWhatsAppToPatient(false);
+    setConfirmStatus('');
+    setConfirmOutcome(null);
   }
 
-  // ── LOAD PATIENT CASE ──
   async function handleSelectPatient(appt) {
     setSelectedAppt(appt);
     setVisit(null);
     setPatient(null);
-    setSoapNote(null);
-    setPrescription([]);
-    setHealthTips([]);
-    setPrescriptionValidation(null);
-    setSoapError('');
-    setConfirmStatus('');
-    setConfirmOutcome(null);
-    setTranscript('');
-    setDecisionPanel([]);
+    resetPrescriptionState();
     setCaseError('');
     setPastVisits([]);
-    setPanelError('');
     setCaseLoading(true);
-    setPanelLoading(true);
 
     try {
-      // Fetch visit — always required
       const visitRes = await client.get(`/api/visits/by-appointment?appointmentId=${appt.id}`);
       const loadedVisit = visitRes.data.visit;
       setVisit(loadedVisit);
-      if (String(loadedVisit.voiceTranscript || '').trim()) {
-        setTranscript(String(loadedVisit.voiceTranscript).trim());
+
+      const restoredDiseases = Array.isArray(loadedVisit.selectedDiseases)
+        ? loadedVisit.selectedDiseases
+        : [];
+      if (restoredDiseases.length > 0) {
+        setSelectedDiseaseIds(restoredDiseases);
       }
 
-      // Restore SOAP / prescription if doctor reopens this case
-      const sn = loadedVisit.soapNote || {};
-      const hasSoap = sn.subjective || sn.objective || sn.assessment || sn.plan;
-      if (hasSoap || (loadedVisit.prescription?.length > 0) || (loadedVisit.healthTips?.length > 0)) {
-        setSoapNote({
-          subjective: sn.subjective || '',
-          objective: sn.objective || '',
-          assessment: sn.assessment || '',
-          plan: sn.plan || '',
-        });
-        setPrescription(loadedVisit.prescription || []);
-        setHealthTips(loadedVisit.healthTips || []);
-        // Avoid stale "green" validation when SOAP text was never saved
-        setPrescriptionValidation(hasSoap ? loadedVisit.prescriptionValidation || null : null);
-      }
-      if (Array.isArray(loadedVisit.decisionPanel) && loadedVisit.decisionPanel.length > 0) {
-        setDecisionPanel(normalizeInsights(loadedVisit.decisionPanel));
+      if (String(loadedVisit.prescriptionLetter || '').trim()) {
+        setPrescriptionLetter(String(loadedVisit.prescriptionLetter).trim());
       }
 
-      // Fetch patient only if patientId exists
+      if (Array.isArray(loadedVisit.selectedMedicines) && loadedVisit.selectedMedicines.length > 0) {
+        setMedicines(loadedVisit.selectedMedicines);
+      } else if (restoredDiseases.length > 0) {
+        await mergeMedicines(restoredDiseases);
+      }
+
       if (appt.patientId) {
-        try {
-          const patientRes = await client.get(`/api/patients/by-id?patientId=${appt.patientId}`);
-          setPatient(patientRes.data.patient);
-        } catch {
-          setPatient(null);
-        }
-        try {
-          const hist = await client.get('/api/visits/history', {
-            params: { patientId: appt.patientId, excludeVisitId: loadedVisit.id },
+        const patientPromise = client
+          .get(`/api/patients/by-id?patientId=${appt.patientId}`)
+          .then((patientRes) => {
+            setPatient(patientRes.data.patient);
+          })
+          .catch(() => {
+            setPatient(null);
           });
-          setPastVisits(hist.data.visits || []);
-        } catch {
-          setPastVisits([]);
-        }
-      }
 
-      // Trigger decision panel generation
-      triggerPanel(loadedVisit.id);
+        const historyPromise = client
+          .get('/api/visits/history', {
+            params: { patientId: appt.patientId, excludeVisitId: loadedVisit.id },
+          })
+          .then((hist) => {
+            setPastVisits(hist.data.visits || []);
+          })
+          .catch(() => {
+            setPastVisits([]);
+          });
+
+        await Promise.all([patientPromise, historyPromise]);
+      }
     } catch {
       setCaseError(t('doctor.loadCaseError'));
-      setPanelLoading(false);
     } finally {
       setCaseLoading(false);
     }
   }
 
-  const soapReady = hasSoapContent(soapNote);
-  const medList = medicinesFromState(soapNote, prescription);
-  const canApprove =
-    soapReady &&
-    medList.length > 0 &&
-    prescriptionValidation?.isCorrect === true;
-
-  async function triggerPanel(visitId, consultationTranscript) {
-    const reqId = ++panelRequestRef.current;
-    setPanelLoading(true);
-    setPanelError('');
-    try {
-      const { data } = await client.post('/api/consultation/panel', {
-        visitId,
-        ...(consultationTranscript?.trim() ? { transcript: consultationTranscript.trim() } : {}),
-      });
-      if (reqId !== panelRequestRef.current) return;
-      setDecisionPanel(normalizeInsights(data.insights));
-    } catch (err) {
-      if (reqId !== panelRequestRef.current) return;
-      setPanelError(err.response?.data?.error || t('doctor.panelInsightFailed'));
-    } finally {
-      if (reqId === panelRequestRef.current) setPanelLoading(false);
-    }
+  async function handleToggleDisease(diseaseId) {
+    const next = selectedDiseaseIds.includes(diseaseId)
+      ? selectedDiseaseIds.filter((id) => id !== diseaseId)
+      : [...selectedDiseaseIds, diseaseId];
+    setSelectedDiseaseIds(next);
+    setGenerateError('');
+    setConfirmStatus('');
+    setConfirmOutcome(null);
+    await mergeMedicines(next);
   }
 
-  // ── GENERATE SOAP NOTE ──
-  async function handleGenerateSOAP() {
-    if (!visit?.id || !transcript.trim()) return;
-    setSoapLoading(true);
-    setSoapError('');
+  function updateMedicine(index, field, value) {
+    setMedicines((prev) =>
+      prev.map((row, i) => (i === index ? { ...row, [field]: value } : row))
+    );
+  }
+
+  function addMedicineRow() {
+    setMedicines((prev) => [...prev, { ...EMPTY_MEDICINE }]);
+  }
+
+  function removeMedicineRow(index) {
+    setMedicines((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  const canGenerate =
+    visit?.id && selectedDiseaseIds.length > 0 && medicines.some((m) => String(m.name || '').trim());
+  const canConfirm = Boolean(visit?.id && String(prescriptionLetter || '').trim());
+
+  async function handleGeneratePrescription() {
+    if (!canGenerate) return;
+    setGenerateLoading(true);
+    setGenerateError('');
     setConfirmStatus('');
     setConfirmOutcome(null);
     try {
-      const { data } = await client.post('/api/consultation/soap', {
+      const { data } = await client.post('/api/prescription/generate', {
         visitId: visit.id,
-        transcript: transcript.trim(),
+        selectedDiseases: selectedDiseaseIds,
+        selectedMedicines: medicines.filter((m) => String(m.name || '').trim()),
       });
-      setSoapNote(data.soapNote);
-      setPrescription(data.prescription || []);
-      setHealthTips(data.healthTips || []);
-      setPrescriptionValidation(data.prescriptionValidation || null);
-      await triggerPanel(visit.id, transcript.trim());
-    } catch (err) {
-      setSoapError(t('doctor.soapGenerateFailed'));
+      setPrescriptionLetter(data.prescriptionLetter || '');
+    } catch {
+      setGenerateError(t('doctor.generatePrescriptionFailed'));
     } finally {
-      setSoapLoading(false);
+      setGenerateLoading(false);
     }
   }
 
-  // ── CONFIRM PRESCRIPTION ──
   async function handleConfirm() {
     if (!visit?.id) return;
-    // Server uses Firestore, not only screen state — must match saved SOAP / prescription
-    if (!canApprove) {
+    if (!canConfirm) {
       setConfirmOutcome('error');
-      setConfirmStatus(t('doctor.confirmPrereq'));
+      setConfirmStatus(t('doctor.confirmPrescriptionPrereq'));
       return;
     }
     setConfirmLoading(true);
     setConfirmStatus('');
     setConfirmOutcome(null);
     try {
-      await client.post('/api/prescription/confirm', { visitId: visit.id });
+      await client.post('/api/prescription/confirm', {
+        visitId: visit.id,
+        sendWhatsAppToPatient,
+        prescriptionLetter: prescriptionLetter.trim(),
+        selectedDiseases: selectedDiseaseIds,
+        selectedMedicines: medicines.filter((m) => String(m.name || '').trim()),
+      });
       setConfirmOutcome('success');
       setConfirmStatus(t('doctor.confirmSuccess'));
       setSelectedAppt(null);
       setVisit(null);
       setPatient(null);
-      setSoapNote(null);
-      setHealthTips([]);
-      setPrescriptionValidation(null);
+      resetPrescriptionState();
     } catch (err) {
       const status = err.response?.status;
       const bodyErr = err.response?.data?.error || err.response?.data?.message;
@@ -430,16 +368,18 @@ export default function DoctorDashboard() {
     }
   }
 
+  const filteredDiseases = diseases.filter((d) => {
+    if (!diseaseSearch.trim()) return true;
+    const q = diseaseSearch.trim().toLowerCase();
+    return (
+      String(d.name || '').toLowerCase().includes(q) ||
+      String(d.id || '').toLowerCase().includes(q)
+    );
+  });
+
   return (
     <Layout>
       <EmergencyBanner />
-
-      {!aiConfigured && (
-        <div className="mx-4 mt-4 max-w-[1600px] lg:mx-auto rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <strong>Gemini AI is not configured.</strong> Add <code className="text-xs bg-amber-100 px-1 rounded">GEMINI_API_KEY</code> in
-          Railway variables, redeploy, then use Generate SOAP Note. You can still type consultation notes below.
-        </div>
-      )}
 
       <div className="max-w-[1600px] mx-auto px-4 py-6 min-h-0">
         <div className="mb-6">
@@ -448,7 +388,6 @@ export default function DoctorDashboard() {
         </div>
 
         <div className="flex flex-col lg:flex-row gap-4 min-h-[calc(100vh-11rem)] max-h-[calc(100vh-8rem)]">
-
           {/* LEFT — Live queue */}
           <div className="flex-[3] min-w-0 flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
             <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/80">
@@ -497,9 +436,7 @@ export default function DoctorDashboard() {
                           <p className="text-xs text-gray-500 mt-0.5">
                             <WaitTime createdAt={appt.createdAt} />
                           </p>
-                          <p className="text-xs text-gray-600 mt-1 line-clamp-2">
-                            {appt.symptoms}
-                          </p>
+                          <p className="text-xs text-gray-600 mt-1 line-clamp-2">{appt.symptoms}</p>
                         </div>
                       </div>
                     </button>
@@ -509,8 +446,8 @@ export default function DoctorDashboard() {
             </div>
           </div>
 
-          {/* CENTER — Patient case */}
-          <div className="flex-[4.5] min-w-0 flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
+          {/* RIGHT — Patient case + prescription flow */}
+          <div className="flex-[7] min-w-0 flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
             <div className="px-4 py-3 border-b border-gray-100 bg-gray-50/80">
               <h2 className="font-semibold text-gray-900 text-sm">
                 {selectedAppt ? selectedAppt.patientName : t('doctor.patientCase')}
@@ -591,10 +528,10 @@ export default function DoctorDashboard() {
                   {visit?.vitals && Object.keys(visit.vitals).length > 0 && (
                     <div className="grid grid-cols-3 gap-2">
                       {[
-                        { labelKey: 'doctor.bloodPressure', sub: 'BP', value: visit.vitals.bp, Icon: Heart },
-                        { labelKey: 'doctor.temperature', sub: '°F', value: visit.vitals.temperature, Icon: Thermometer },
-                        { labelKey: 'doctor.spo2', sub: '%', value: visit.vitals.spo2, Icon: Activity },
-                      ].map(({ labelKey, sub, value, Icon }) => (
+                        { labelKey: 'doctor.bloodPressure', value: visit.vitals.bp, Icon: Heart },
+                        { labelKey: 'doctor.temperature', value: visit.vitals.temperature, Icon: Thermometer },
+                        { labelKey: 'doctor.spo2', value: visit.vitals.spo2, Icon: Activity },
+                      ].map(({ labelKey, value, Icon }) => (
                         <div key={labelKey} className="rounded-xl border border-gray-100 bg-white p-3 text-center shadow-sm">
                           <Icon className="h-5 w-5 mx-auto text-primary-600 mb-1" aria-hidden />
                           <p className="text-lg font-bold text-gray-900">{value || '—'}</p>
@@ -627,308 +564,201 @@ export default function DoctorDashboard() {
                     </div>
                   )}
 
-                  <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-3">
-                    <h3 className="text-sm font-semibold text-gray-900">{t('doctor.consultationNotes')}</h3>
+                  {/* Disease picker + prescription flow */}
+                  <div className="rounded-xl border border-gray-100 bg-white p-4 shadow-sm space-y-4">
+                    <h3 className="text-sm font-semibold text-gray-900">{t('doctor.diseasePicker')}</h3>
 
-                    {speechSupported ? (
-                      <div className="space-y-3 flex flex-col items-center">
+                    {diseasesLoading ? (
+                      <div className="flex justify-center py-4">
+                        <Loader2 className="h-6 w-6 text-primary-600 animate-spin" aria-hidden />
+                      </div>
+                    ) : diseasesError ? (
+                      <p className="text-xs text-red-600">{diseasesError}</p>
+                    ) : (
+                      <>
+                        <input
+                          type="search"
+                          value={diseaseSearch}
+                          onChange={(e) => setDiseaseSearch(e.target.value)}
+                          placeholder={t('doctor.diseaseSearch')}
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                        />
+                        <div className="max-h-48 overflow-y-auto space-y-1 border border-gray-100 rounded-lg p-2">
+                          {filteredDiseases.length === 0 ? (
+                            <p className="text-xs text-gray-400 text-center py-3">{t('doctor.noDiseasesMatch')}</p>
+                          ) : (
+                            filteredDiseases.map((disease) => (
+                              <label
+                                key={disease.id}
+                                className="flex items-start gap-2 rounded-md px-2 py-1.5 hover:bg-gray-50 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selectedDiseaseIds.includes(disease.id)}
+                                  onChange={() => handleToggleDisease(disease.id)}
+                                  className="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                                />
+                                <span className="text-sm text-gray-800">{disease.name}</span>
+                              </label>
+                            ))
+                          )}
+                        </div>
+                      </>
+                    )}
+
+                    {selectedDiseaseIds.length === 0 && (
+                      <p className="text-xs text-gray-500">{t('doctor.selectDiseasesHint')}</p>
+                    )}
+
+                    {(medicines.length > 0 || medicinesLoading) && (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <h4 className="text-sm font-semibold text-gray-900">{t('doctor.medicines')}</h4>
+                          {medicinesLoading && (
+                            <Loader2 className="h-4 w-4 text-primary-600 animate-spin" aria-hidden />
+                          )}
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs border-collapse">
+                            <thead>
+                              <tr className="border-b border-gray-200 text-left text-gray-500">
+                                <th className="py-2 pr-2 font-semibold">{t('doctor.medicineName')}</th>
+                                <th className="py-2 pr-2 font-semibold">{t('doctor.recommendedDosage')}</th>
+                                <th className="py-2 pr-2 font-semibold">{t('doctor.frequency')}</th>
+                                <th className="py-2 pr-2 font-semibold">{t('doctor.usualDuration')}</th>
+                                <th className="py-2 pr-2 font-semibold">{t('doctor.notes')}</th>
+                                <th className="py-2 w-8" />
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {medicines.map((med, index) => (
+                                <tr key={index} className="border-b border-gray-50">
+                                  {['name', 'recommendedDosage', 'frequency', 'usualDuration', 'notes'].map((field) => (
+                                    <td key={field} className="py-1 pr-2">
+                                      <input
+                                        type="text"
+                                        value={med[field] || ''}
+                                        onChange={(e) => updateMedicine(index, field, e.target.value)}
+                                        className="w-full min-w-[80px] rounded border border-gray-200 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary-500/30"
+                                      />
+                                    </td>
+                                  ))}
+                                  <td className="py-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => removeMedicineRow(index)}
+                                      className="p-1 text-red-500 hover:text-red-700"
+                                      aria-label={t('doctor.removeMedicine')}
+                                    >
+                                      <Trash2 className="h-4 w-4" aria-hidden />
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                         <button
                           type="button"
-                          onClick={recording ? stopRecording : startRecording}
-                          className={`flex h-20 w-20 items-center justify-center rounded-full text-white shadow-lg transition hover:scale-105 focus:outline-none focus:ring-4 focus:ring-primary-300 ${
-                            recording ? 'bg-gray-700 animate-pulse' : 'bg-primary-600 hover:bg-primary-700'
-                          }`}
-                          aria-pressed={recording}
+                          onClick={addMedicineRow}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:text-primary-700"
                         >
-                          <Mic className="h-9 w-9" strokeWidth={2} aria-hidden />
+                          <Plus className="h-3.5 w-3.5" aria-hidden />
+                          {t('doctor.addMedicine')}
                         </button>
-                        <p className="text-xs font-medium text-gray-600">
-                          {recording ? t('doctor.stopRecording') : t('doctor.startRecording')}
-                        </p>
-                        {speechInsecureHint && (
-                          <p className="text-[11px] text-amber-700 text-center max-w-sm">{t('doctor.speechHttps')}</p>
-                        )}
-                        {speechError && (
-                          <p className="text-[11px] text-red-600 text-center max-w-sm">{speechError}</p>
-                        )}
-                        <p className="text-[11px] text-gray-500 text-center max-w-sm">
-                          {t('doctor.speechTypeFallback')}
-                        </p>
-                        <textarea
-                          value={transcript}
-                          onChange={(e) => setTranscript(e.target.value)}
-                          placeholder={t('doctor.transcriptPlaceholder')}
-                          rows={5}
-                          className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-800 resize-none min-h-[100px] focus:outline-none focus:ring-2 focus:ring-primary-500/30"
-                        />
                       </div>
-                    ) : (
-                      <textarea
-                        value={transcript}
-                        onChange={(e) => setTranscript(e.target.value)}
-                        placeholder={t('doctor.typeNotesPlaceholder')}
-                        rows={5}
-                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary-500/30 resize-none"
-                      />
                     )}
 
                     <button
                       type="button"
-                      onClick={handleGenerateSOAP}
-                      disabled={soapLoading || !transcript.trim()}
+                      onClick={handleGeneratePrescription}
+                      disabled={generateLoading || !canGenerate}
                       className="w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white hover:bg-primary-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      {soapLoading ? (
+                      {generateLoading ? (
                         <span className="inline-flex items-center justify-center gap-2">
                           <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                          {t('doctor.generatingSoap')}
+                          {t('doctor.generatingPrescription')}
                         </span>
                       ) : (
-                        t('doctor.generateSoap')
+                        t('doctor.generatePrescription')
                       )}
                     </button>
-                    <p className="text-[11px] text-gray-500 leading-snug">
-                      <Trans i18nKey="doctor.generateSoapHint" components={{ strong: <strong /> }} />
-                    </p>
 
-                    {soapError && (
+                    {generateError && (
                       <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-2 text-xs text-red-800">
                         <AlertCircle className="h-4 w-4 shrink-0 text-red-600 mt-0.5" aria-hidden />
-                        <span>{soapError}</span>
+                        <span>{generateError}</span>
+                      </div>
+                    )}
+
+                    {(prescriptionLetter || canGenerate) && (
+                      <div className="space-y-3 pt-2 border-t border-gray-100">
+                        <label className="block text-sm font-semibold text-gray-900">
+                          {t('doctor.prescriptionLetter')}
+                        </label>
+                        <textarea
+                          value={prescriptionLetter}
+                          onChange={(e) => setPrescriptionLetter(e.target.value)}
+                          rows={10}
+                          placeholder={t('doctor.prescriptionLetterPlaceholder')}
+                          className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-800 resize-y min-h-[160px] focus:outline-none focus:ring-2 focus:ring-primary-500/30"
+                        />
+
+                        <label className="flex items-start gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={sendWhatsAppToPatient}
+                            onChange={(e) => setSendWhatsAppToPatient(e.target.checked)}
+                            className="mt-0.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+                          />
+                          <span className="text-sm text-gray-700">{t('doctor.sendWhatsAppToPatient')}</span>
+                        </label>
+
+                        <button
+                          type="button"
+                          onClick={handleConfirm}
+                          disabled={confirmLoading || !canConfirm}
+                          className={`w-full py-3 rounded-lg text-sm font-bold transition flex items-center justify-center gap-2 ${
+                            canConfirm && !confirmLoading
+                              ? 'bg-medical-green text-white hover:opacity-95 shadow-sm'
+                              : 'bg-gray-300 text-gray-600 cursor-not-allowed'
+                          }`}
+                        >
+                          {confirmLoading ? (
+                            <span className="inline-flex items-center gap-2">
+                              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                              {t('doctor.confirmSending')}
+                            </span>
+                          ) : (
+                            t('doctor.confirmSend')
+                          )}
+                        </button>
+
+                        {!canConfirm && !confirmLoading && (
+                          <p className="text-[11px] text-gray-500 text-center">{t('doctor.confirmPrescriptionHint')}</p>
+                        )}
+
+                        {confirmStatus && (
+                          <p
+                            className={`text-xs text-center ${
+                              confirmOutcome === 'success' ? 'text-green-600' : 'text-red-600'
+                            }`}
+                          >
+                            {confirmStatus}
+                          </p>
+                        )}
+
+                        <p className="text-[10px] text-gray-400 leading-relaxed border-t border-gray-100 pt-3">
+                          {t('doctor.medicationDisclaimer')}
+                        </p>
                       </div>
                     )}
                   </div>
-
-                  {/* SOAP Note */}
-                  {soapNote && (
-                    <div className="rounded-xl border border-gray-100 bg-white p-6 shadow-sm space-y-4">
-                      <h3 className="text-sm font-semibold text-gray-900">{t('doctor.soapNote')}</h3>
-
-                      {['subjective', 'objective', 'assessment', 'plan'].map((key) => (
-                        <div key={key}>
-                          <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">{t(`doctor.${key}`)}</p>
-                          <p className="text-sm text-gray-800">{soapNote[key] || '—'}</p>
-                        </div>
-                      ))}
-
-                      {medList.length > 0 && (
-                        <div>
-                          <p className="text-xs font-semibold text-gray-500 uppercase mb-2">{t('doctor.prescription')}</p>
-                          <div className="flex flex-wrap gap-2">
-                            {medList.map((med, i) => (
-                              <span
-                                key={i}
-                                className="inline-flex rounded-full bg-primary-50 px-3 py-1 text-xs font-medium text-primary-800 border border-primary-100"
-                              >
-                                {typeof med === 'string' ? med : med?.name || String(med)}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Prescription Validation */}
-                      {prescriptionValidation && (
-                        <div className={`rounded-lg px-3 py-2 text-sm font-medium flex items-start gap-2 ${
-                          prescriptionValidation.isCorrect
-                            ? 'bg-green-50 border border-green-300 text-green-700'
-                            : 'bg-red-50 border border-red-300 text-red-700'
-                        }`}>
-                          <span className="text-lg shrink-0">
-                            {prescriptionValidation.isCorrect ? '✅' : '⚠️'}
-                          </span>
-                          <div>
-                            <p className="font-semibold">
-                              {prescriptionValidation.isCorrect
-                                ? t('doctor.rxLooksCorrect')
-                                : soapReady
-                                  ? t('doctor.rxWrongDetected')
-                                  : t('doctor.rxSoapNotGenerated')}
-                            </p>
-                            {prescriptionValidation.message && (
-                              <p className="text-xs mt-0.5 opacity-90">{prescriptionValidation.message}</p>
-                            )}
-                            {!prescriptionValidation.isCorrect && prescriptionValidation.suggestedMedicines?.length > 0 && (
-                              <p className="text-xs mt-1 font-semibold">
-                                {t('doctor.suggested')} {prescriptionValidation.suggestedMedicines.join(', ')}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Health Tips */}
-                      {healthTips.length > 0 && (
-                        <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2">
-                          <p className="text-xs font-semibold text-blue-600 uppercase mb-1">
-                            💡 {t('doctor.healthTipsTitle')}
-                          </p>
-                          <ul className="space-y-1">
-                            {healthTips.map((tip, i) => (
-                              <li key={i} className="text-sm text-blue-700 flex items-start gap-1">
-                                <span className="shrink-0">{i + 1}.</span> {tipToString(tip)}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-
-                      {/* Approve — SOAP filled + medicines + AI validation must pass */}
-                      {!soapReady && (
-                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                          {t('doctor.soapMustFill')}
-                        </p>
-                      )}
-                      {soapReady && medList.length === 0 && (
-                        <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1.5">
-                          {t('doctor.addMedsHint')}
-                        </p>
-                      )}
-                      {soapReady && medList.length > 0 && prescriptionValidation && !prescriptionValidation.isCorrect && (
-                        <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded px-2 py-1.5">
-                          {t('doctor.aiFlaggedHint')}
-                        </p>
-                      )}
-                      <button
-                        type="button"
-                        onClick={handleConfirm}
-                        disabled={confirmLoading || !canApprove}
-                        className={`w-full py-3 rounded-lg text-sm font-bold transition mt-1 flex items-center justify-center gap-2 ${
-                          canApprove && !confirmLoading
-                            ? 'bg-medical-green text-white hover:opacity-95 shadow-sm'
-                            : 'bg-gray-300 text-gray-600 cursor-not-allowed'
-                        }`}
-                      >
-                        {confirmLoading ? (
-                          <span className="inline-flex items-center gap-2">
-                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
-                            {t('doctor.confirmSending')}
-                          </span>
-                        ) : canApprove ? (
-                          t('doctor.confirmSend')
-                        ) : (
-                          t('doctor.confirmLocked')
-                        )}
-                      </button>
-                      {!canApprove && !confirmLoading && (
-                        <p className="text-[11px] text-gray-500 text-center mt-1">
-                          <Trans i18nKey="doctor.confirmHint" components={{ strong: <strong /> }} />
-                        </p>
-                      )}
-
-                      {confirmStatus && (
-                        <p
-                          className={`text-xs text-center ${
-                            confirmOutcome === 'success' ? 'text-green-600' : 'text-red-600'
-                          }`}
-                        >
-                          {confirmStatus}
-                        </p>
-                      )}
-                    </div>
-                  )}
                 </>
               )}
             </div>
           </div>
-
-          {/* RIGHT — AI Decision Panel */}
-          <div className="flex-[2.5] min-w-0 flex flex-col rounded-xl border border-gray-100 bg-white shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2 px-4 py-3 border-b border-gray-100 bg-gray-50/80">
-              <Sparkles className="h-4 w-4 text-primary-600 shrink-0" aria-hidden />
-              <h2 className="font-semibold text-gray-900 text-sm">{t('doctor.aiPanel')}</h2>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-4 min-h-0">
-              {!selectedAppt ? (
-                <p className="text-center text-gray-400 text-xs pt-6">{t('doctor.selectForInsights')}</p>
-              ) : (
-                <>
-                  {soapReady && prescriptionValidation && (
-                    <div
-                      className={`mb-4 rounded-xl border p-3 text-sm ${
-                        prescriptionValidation.isCorrect
-                          ? 'border-green-300 bg-green-50 text-green-900'
-                          : 'border-red-300 bg-red-50 text-red-900'
-                      }`}
-                    >
-                      <p className="font-bold text-xs uppercase tracking-wide mb-1">
-                        {prescriptionValidation.isCorrect ? t('doctor.rxCheckOk') : t('doctor.rxCheckReview')}
-                      </p>
-                      {!prescriptionValidation.isCorrect && (
-                        <>
-                          <p className="font-semibold">{t('doctor.possibleMedIssue')}</p>
-                          {prescriptionValidation.message && (
-                            <p className="text-xs mt-1.5 leading-relaxed">{prescriptionValidation.message}</p>
-                          )}
-                          {prescriptionValidation.suggestedMedicines?.length > 0 && (
-                            <p className="text-xs mt-2 font-medium">
-                              {t('doctor.suggestedAlternatives')} {prescriptionValidation.suggestedMedicines.join(', ')}
-                            </p>
-                          )}
-                        </>
-                      )}
-                      {prescriptionValidation.isCorrect && (
-                        <p className="text-xs mt-0.5">{t('doctor.aiCrosscheckOk')}</p>
-                      )}
-                    </div>
-                  )}
-
-                  {panelLoading ? (
-                    <div className="flex flex-col items-center pt-6 gap-3">
-                      <Loader2 className="h-6 w-6 text-primary-600 animate-spin" aria-hidden />
-                      <p className="text-xs text-gray-500">{t('doctor.generatingInsights')}</p>
-                    </div>
-                  ) : panelError ? (
-                    <div className="flex flex-col items-center pt-4 gap-3 px-2">
-                      <p className="text-xs text-red-600 text-center">{panelError}</p>
-                      <button
-                        type="button"
-                        onClick={() => visit?.id && triggerPanel(visit.id, transcript)}
-                        className="rounded-lg border border-primary-600 bg-white px-4 py-2 text-xs font-semibold text-primary-600 hover:bg-primary-50 transition"
-                      >
-                        {t('doctor.retry')}
-                      </button>
-                    </div>
-                  ) : decisionPanel.length === 0 ? (
-                    <div className="flex flex-col items-center pt-4 gap-3 px-2">
-                      <p className="text-xs text-gray-400 text-center">{t('doctor.noInsightsYet')}</p>
-                      <button
-                        type="button"
-                        onClick={() => visit?.id && triggerPanel(visit.id, transcript)}
-                        className="rounded-lg bg-primary-600 px-4 py-2 text-xs font-semibold text-white hover:bg-primary-700 transition"
-                      >
-                        {t('doctor.generateInsights')}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {decisionPanel.slice(0, 3).map((insight, i) => {
-                        const cfg = [
-                          { Icon: AlertTriangle, bar: 'border-l-4 border-amber-400', bg: 'bg-amber-50/90' },
-                          { Icon: BarChart3, bar: 'border-l-4 border-blue-500', bg: 'bg-blue-50/90' },
-                          { Icon: Shield, bar: 'border-l-4 border-red-500', bg: 'bg-red-50/90' },
-                        ][i];
-                        const Icon = cfg.Icon;
-                        return (
-                          <div
-                            key={i}
-                            className={`rounded-lg border border-gray-100 pl-3 pr-3 py-2.5 ${cfg.bar} ${cfg.bg}`}
-                          >
-                            <div className="flex gap-2">
-                              <Icon className="h-4 w-4 shrink-0 text-gray-700 mt-0.5" aria-hidden />
-                              <p className="text-xs text-gray-800 leading-snug">{insightToString(insight)}</p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          </div>
-
         </div>
       </div>
     </Layout>

@@ -70,6 +70,7 @@ router.get('/today', verifyToken, ...authRoles('nurse', 'doctor', 'ops'), async 
     const snapshot = await db
       .collection('appointments')
       .where('clinicId', '==', clinicId)
+      .limit(Math.min(limit * 4, MAX_LIMIT * 2))
       .get();
 
     const appointments = snapshot.docs

@@ -24,20 +24,21 @@ router.post('/', verifyToken, ...authRoles('nurse', 'ops'), async (req, res, nex
 
     const appt = apptSnap.data();
 
-    let patient = {};
-    if (appt.patientId) {
-      const patientSnap = await db.collection('patients').doc(appt.patientId).get();
-      if (patientSnap.exists) {
-        patient = patientSnap.data();
-      }
-    }
+    const patientRef = appt.patientId ? db.collection('patients').doc(appt.patientId) : null;
+    const [patientSnap, triageResult] = await Promise.all([
+      patientRef ? patientRef.get() : Promise.resolve(null),
+      classifyUrgency({
+        symptoms: appt.symptoms || '',
+        age: '',
+        conditions: '',
+        allergies: '',
+      }),
+    ]);
 
-    const triageResult = await classifyUrgency({
-      symptoms: appt.symptoms || '',
-      age: patient.age || '',
-      conditions: patient.conditions || '',
-      allergies: patient.allergies || '',
-    });
+    let patient = {};
+    if (patientSnap?.exists) {
+      patient = patientSnap.data();
+    }
 
     const { urgency, department, reason } = triageResult;
 

@@ -13,6 +13,7 @@ import PatientRegister from './pages/PatientRegister';
 import AppointmentBook from './pages/AppointmentBook';
 import PatientWaiting from './pages/PatientWaiting';
 import PatientDashboard from './pages/PatientDashboard';
+import Payment from './pages/Payment';
 import PaymentSuccess from './pages/PaymentSuccess';
 
 export default function App() {
@@ -111,6 +112,7 @@ export default function App() {
               }
             />
 
+            <Route path="/pay" element={<Payment />} />
             <Route path="/payment-success" element={<PaymentSuccess />} />
 
             <Route path="*" element={<Navigate to="/login" replace />} />

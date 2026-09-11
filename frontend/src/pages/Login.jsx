@@ -66,7 +66,11 @@ function loginErrorMessage(err, t) {
 
   const msg = err?.message || '';
   if (msg === 'Network Error' || msg === 'Failed to fetch') {
-    return t('login.errorNetwork');
+    if (import.meta.env.PROD) {
+      return t('login.errorNetwork');
+    }
+    const api = (import.meta.env.VITE_API_URL || 'http://localhost:4000').replace(/\/$/, '');
+    return t('login.errorNetworkDev', { api, origin: window.location.origin });
   }
   return msg || t('login.errorLoginGeneric');
 }

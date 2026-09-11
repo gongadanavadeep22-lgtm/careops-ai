@@ -15,18 +15,16 @@ function getGenerativeModelRequestOptions() {
 
 /**
  * Model IDs for Google AI Studio / generativelanguage.googleapis.com (see https://ai.google.dev/gemini-api/docs/models).
- * Avoid deprecated aliases that 404 (e.g. gemini-1.5-flash, gemini-pro on many keys).
- * gemini-2.0-flash may 429 on free tier — we retry after backoff and try 2.5 / flash-latest (separate quotas).
+ * 2.x / 2.5 aliases 404 for new keys — Google now routes to gemini-3.x (see API error hints).
+ * Override with GEMINI_MODEL if your key only supports a specific ID.
  */
 function modelNameCandidates() {
   const envModel = process.env.GEMINI_MODEL?.trim();
   const defaults = [
-    'gemini-2.5-flash',
-    'gemini-2.5-flash-lite',
+    'gemini-3.5-flash-lite',
+    'gemini-3.6-flash',
+    'gemini-3.1-pro-preview',
     'gemini-flash-latest',
-    'gemini-2.5-pro',
-    'gemini-2.0-flash',
-    'gemini-2.0-flash-001',
   ];
   const list = [];
   if (envModel) list.push(envModel);
@@ -36,8 +34,29 @@ function modelNameCandidates() {
   return list;
 }
 
+function getRequestTimeoutMs(override) {
+  if (override != null && Number.isFinite(override) && override > 0) return override;
+  const v = parseInt(process.env.GEMINI_REQUEST_TIMEOUT_MS || '8000', 10);
+  return Number.isFinite(v) && v > 0 ? v : 8000;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`${label || 'Gemini request'} timed out after ${ms}ms`)),
+      ms
+    );
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Parse "Please retry in 12.3s" from Gemini 429 bodies */
@@ -52,16 +71,57 @@ function isRateLimited(err) {
   return err?.status === 429 || /429|Too Many Requests|quota|rate limit/i.test(String(err?.message || ''));
 }
 
-async function generateContentWithFallback(request) {
+function isModelUnavailable(err) {
+  return err?.status === 503 || /503|high demand|unavailable/i.test(String(err?.message || ''));
+}
+
+function fastTriageFromSymptoms(symptoms) {
+  const s = String(symptoms || '').toLowerCase();
+  if (
+    /\b(chest pain|heart attack|can't breathe|cannot breathe|not breathing|unconscious|unresponsive|severe bleeding|stroke|seizure|cardiac arrest)\b/.test(
+      s
+    )
+  ) {
+    return { urgency: 'EMERGENCY', department: 'Emergency', reason: 'Critical symptom keywords' };
+  }
+  if (
+    /\b(high fever|104|105|severe pain|vomiting blood|blood in stool|dehydration|fainting)\b/.test(s)
+  ) {
+    return { urgency: 'PRIORITY', department: 'General', reason: 'Urgent symptom keywords' };
+  }
+  return null;
+}
+
+function isModelNotFound(err) {
+  const msg = String(err?.message || '');
+  return (
+    err?.status === 404 &&
+    /no longer available|not found for API version|is not found|models\//i.test(msg)
+  );
+}
+
+/** e.g. "use models/gemini-3.6-flash" in 404 bodies */
+function extractSuggestedModelFrom404(err) {
+  const msg = String(err?.message || '');
+  const m = msg.match(/use models\/([a-z0-9.-]+)/i);
+  return m ? m[1] : null;
+}
+
+async function generateContentWithFallback(request, options = {}) {
   const key = (process.env.GEMINI_API_KEY || '').trim();
   if (!key) {
     const err = new Error('GEMINI_API_KEY is not set');
     console.error('[Gemini]', err.message);
     throw err;
   }
+  const perModelTimeoutMs = getRequestTimeoutMs(options.timeoutMs);
+  const maxModels =
+    options.maxModels != null && Number.isFinite(options.maxModels) && options.maxModels > 0
+      ? Math.floor(options.maxModels)
+      : null;
+  const forceSkipAlternate = options.skipAlternatePass === true;
   const genAI = new GoogleGenerativeAI(key);
   const reqOpts = getGenerativeModelRequestOptions();
-  const apiLabel = reqOpts.apiVersion || 'v1beta(default)';
   let lastErr;
 
   async function tryModelOnce(name, opts) {
@@ -73,6 +133,7 @@ async function generateContentWithFallback(request) {
     try {
       return await tryModelOnce(name, opts);
     } catch (e) {
+      if (isModelUnavailable(e)) throw e;
       if (!isRateLimited(e)) throw e;
       const wait = retryDelayMsFrom429(e);
       console.warn(`[Gemini] 429 on ${name} (${apiLabelForLog}) — waiting ${wait}ms then one retry`);
@@ -81,28 +142,72 @@ async function generateContentWithFallback(request) {
     }
   }
 
+  async function tryOneModel(name, opts, label, passLabel) {
+    const result = await withTimeout(
+      tryModelWith429Retry(name, opts, label),
+      perModelTimeoutMs,
+      `Gemini ${name}`
+    );
+    console.log(`[Gemini] OK model=${name} api=${label}${passLabel ? ` ${passLabel}` : ''}`);
+    return result;
+  }
+
   async function runPass(opts, passLabel) {
     const label = opts.apiVersion || 'v1beta(default)';
-    for (const name of modelNameCandidates()) {
+    const names = modelNameCandidates().slice(0, maxModels || undefined);
+    let modelNotFoundCount = 0;
+    let modelsTried = 0;
+
+    for (const name of names) {
+      modelsTried += 1;
       try {
-        const result = await tryModelWith429Retry(name, opts, label);
-        console.log(`[Gemini] OK model=${name} api=${label}${passLabel ? ` ${passLabel}` : ''}`);
-        return result;
+        return await tryOneModel(name, opts, label, passLabel);
       } catch (e) {
         lastErr = e;
-        console.warn(`[Gemini] fail model=${name} api=${label}: ${e.message}`);
+        if (isModelNotFound(e)) {
+          modelNotFoundCount += 1;
+          const suggested = extractSuggestedModelFrom404(e);
+          if (suggested && !names.includes(suggested)) {
+            try {
+              return await tryOneModel(suggested, opts, label, passLabel);
+            } catch (suggestedErr) {
+              lastErr = suggestedErr;
+              console.warn(
+                `[Gemini] fail suggested model=${suggested} api=${label}: ${suggestedErr.message}`
+              );
+            }
+          }
+        } else if (isModelUnavailable(e)) {
+          console.warn(`[Gemini] skip model=${name} api=${label}: unavailable (${e.status || 503})`);
+        } else {
+          console.warn(`[Gemini] fail model=${name} api=${label}: ${e.message}`);
+        }
       }
+    }
+
+    if (modelNotFoundCount >= modelsTried) {
+      return { __allModelsNotFound: true };
     }
     return null;
   }
 
-  let result = await runPass(reqOpts, '');
-  if (result) return result;
+  let skipAlternate = false;
+  let firstPass = await runPass(reqOpts, '');
+  if (firstPass?.__allModelsNotFound) {
+    skipAlternate = true;
+    firstPass = null;
+  } else if (firstPass) {
+    return firstPass;
+  }
 
   const alt = { apiVersion: reqOpts.apiVersion === 'v1' ? 'v1beta' : 'v1' };
-  if (!process.env.GEMINI_API_VERSION?.trim()) {
-    result = await runPass(alt, '(alternate)');
-    if (result) return result;
+  if (!forceSkipAlternate && !skipAlternate && !process.env.GEMINI_API_VERSION?.trim()) {
+    let secondPass = await runPass(alt, '(alternate)');
+    if (secondPass?.__allModelsNotFound) {
+      secondPass = null;
+    } else if (secondPass) {
+      return secondPass;
+    }
   }
 
   console.error('[Gemini] all models failed — last error:', lastErr);
@@ -271,6 +376,8 @@ async function generateContentJsonFirst(prompt) {
     return extractJsonObject(text) ?? extractJsonArray(text);
   }
 
+  let jsonModeAllModelsFailed = false;
+
   try {
     const result = await generateContentWithFallback(jsonBody);
     const text = extractResponseText(result);
@@ -280,20 +387,31 @@ async function generateContentJsonFirst(prompt) {
       '[Gemini] JSON-mode response empty or not parseable; retrying as plain text (same prompt)'
     );
   } catch (e) {
+    jsonModeAllModelsFailed = /all model attempts failed|timed out after/i.test(String(e?.message || ''));
+    if (jsonModeAllModelsFailed) {
+      console.warn('[Gemini] JSON-mode unavailable (models/key); skipping plain-text retry');
+      return null;
+    }
     console.warn('Gemini JSON-mode failed, trying plain text. First error:', e.message);
-    console.error('Gemini JSON-mode error full:', e);
   }
 
   try {
     return await parseFromPlainTextRequest();
   } catch (e2) {
-    console.error('Gemini plain text failed full:', e2);
-    console.error('Gemini plain text failed message:', e2.message);
+    console.warn('Gemini plain text failed:', e2.message);
     return null;
   }
 }
 
 async function classifyUrgency({ symptoms, age, conditions, allergies }) {
+  const fallback = { urgency: 'GENERAL', department: 'General', reason: 'AI unavailable' };
+
+  const fast = fastTriageFromSymptoms(symptoms);
+  if (fast) return fast;
+
+  const key = (process.env.GEMINI_API_KEY || '').trim();
+  if (!key) return fallback;
+
   const prompt = `You are a hospital triage AI.
 Classify the urgency of this patient.
 Age: ${age}
@@ -303,19 +421,32 @@ Symptoms: ${symptoms}
 Respond with valid JSON only. No markdown. No explanation.
 Format: {"urgency": "EMERGENCY|PRIORITY|GENERAL", "department": "string", "reason": "string"}`;
 
+  const classifyTimeoutMs = parseInt(process.env.GEMINI_CLASSIFY_TIMEOUT_MS || '7000', 10);
+  const budgetMs =
+    Number.isFinite(classifyTimeoutMs) && classifyTimeoutMs > 0 ? classifyTimeoutMs : 7000;
+
   try {
-    const parsed = await generateContentJsonFirst(prompt);
+    const result = await withTimeout(
+      generateContentWithFallback(prompt, {
+        timeoutMs: Math.min(6000, budgetMs),
+        maxModels: 2,
+        skipAlternatePass: true,
+      }),
+      budgetMs,
+      'classifyUrgency'
+    );
+    const text = extractResponseText(result);
+    const parsed = text ? extractJsonObject(text) : null;
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      throw new Error('Invalid urgency JSON');
+      return fallback;
     }
     if (!['EMERGENCY', 'PRIORITY', 'GENERAL'].includes(parsed.urgency)) {
       parsed.urgency = 'GENERAL';
     }
     return parsed;
   } catch (error) {
-    console.error('Gemini classifyUrgency error full:', error);
-    console.error('Gemini classifyUrgency message:', error.message);
-    return { urgency: 'GENERAL', department: 'General', reason: 'AI unavailable' };
+    console.warn('Gemini classifyUrgency fallback:', error.message);
+    return fallback;
   }
 }
 
@@ -441,4 +572,118 @@ Format: {"insights":["insight one","insight two","insight three"]}`;
   }
 }
 
-module.exports = { classifyUrgency, generateSOAPNote, generateDecisionPanel };
+function buildFallbackPrescriptionLetter({ patientName, hospitalName, diseaseList, medLines }) {
+  const today = new Date().toLocaleDateString('en-IN', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  });
+  return (
+    `${hospitalName}\nCareOps AI\nDate: ${today}\n\n` +
+    `Patient: ${patientName || 'Patient'}\n\n` +
+    `Diagnosis: ${diseaseList || 'As assessed by your doctor'}\n\n` +
+    `Medicines:\n${medLines || '(See selected medicines on file)'}\n\n` +
+    `Please take medicines as directed. Return if symptoms worsen or do not improve.\n\n` +
+    `Prescribed under the clinical judgment of your treating physician at ${hospitalName}.`
+  );
+}
+
+async function generatePrescriptionLetter({
+  patientName,
+  age,
+  conditions,
+  allergies,
+  vitals,
+  diseases,
+  medicines,
+  hospitalName = 'CareOps Hospital',
+}) {
+  const vitalsStr = vitals
+    ? `BP: ${vitals.bp || 'N/A'}, Temp: ${vitals.temperature || 'N/A'}°F, SpO2: ${vitals.spo2 || 'N/A'}%`
+    : 'N/A';
+
+  const diseaseList = Array.isArray(diseases)
+    ? diseases
+        .map((d) => (typeof d === 'string' ? d : d?.name || d?.id || ''))
+        .filter(Boolean)
+        .join(', ')
+    : '';
+
+  const medLines = Array.isArray(medicines)
+    ? medicines
+        .map((m, i) => {
+          if (typeof m === 'string') return `${i + 1}. ${m}`;
+          const parts = [
+            m.name,
+            m.recommendedDosage || m.dosage || m.strength,
+            m.frequency,
+            m.usualDuration || m.duration,
+            m.notes,
+          ].filter(Boolean);
+          return `${i + 1}. ${parts.join(' — ')}`;
+        })
+        .join('\n')
+    : '';
+
+  const prompt = `You are a clinical documentation assistant at ${hospitalName} (CareOps AI platform).
+Write a patient-friendly prescription letter in plain natural language. Do NOT output JSON or markdown code blocks.
+
+Patient: ${patientName || 'Patient'}, Age: ${age || 'unknown'}
+Known conditions: ${conditions || 'none stated'}
+Allergies: ${allergies || 'none stated'}
+Vitals: ${vitalsStr}
+
+Diagnoses for this visit: ${diseaseList || 'As discussed with doctor'}
+
+Medicines selected by the doctor:
+${medLines || 'None listed'}
+
+Requirements:
+- Start with a clear ${hospitalName} header and today's date
+- Include patient name
+- List each medicine with name, dosage/strength, frequency (morning/afternoon/night where applicable), food timing if relevant, and duration
+- Add brief care instructions and follow-up advice appropriate to the conditions
+- End with: "Prescribed under the clinical judgment of your treating physician at ${hospitalName}."
+- Plain text only with line breaks for readability
+- Professional, warm, and clear`;
+
+  const fallback = buildFallbackPrescriptionLetter({
+    patientName,
+    hospitalName,
+    diseaseList,
+    medLines,
+  });
+
+  const key = (process.env.GEMINI_API_KEY || '').trim();
+  if (!key) return fallback;
+
+  const letterTimeoutMs = parseInt(process.env.GEMINI_PRESCRIPTION_TIMEOUT_MS || '10000', 10);
+  const budgetMs =
+    Number.isFinite(letterTimeoutMs) && letterTimeoutMs > 0 ? letterTimeoutMs : 10000;
+
+  try {
+    const result = await withTimeout(
+      generateContentWithFallback(prompt, {
+        timeoutMs: Math.min(8000, budgetMs),
+        maxModels: 2,
+        skipAlternatePass: true,
+      }),
+      budgetMs,
+      'generatePrescriptionLetter'
+    );
+    const text = extractResponseText(result);
+    if (text && text.trim()) return text.trim();
+    console.warn('[Gemini] generatePrescriptionLetter returned empty body; using fallback template');
+    return fallback;
+  } catch (error) {
+    console.warn('[Gemini] generatePrescriptionLetter fallback:', error.message);
+    return fallback;
+  }
+}
+
+module.exports = {
+  classifyUrgency,
+  generateSOAPNote,
+  generateDecisionPanel,
+  generatePrescriptionLetter,
+};

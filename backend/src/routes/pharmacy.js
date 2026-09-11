@@ -5,9 +5,15 @@ const { authRoles, getClinicId } = require('../middleware/requireRole');
 const { db } = require('../services/firestore');
 const { sendWhatsApp } = require('../services/twilio');
 const { medicinesForVisit } = require('../utils/visitMedicines');
+const {
+  resolvePatientPhone,
+  buildPickupWhatsAppMessage,
+  patientFacingAppUrl,
+} = require('../utils/prescriptionMessages');
 
 const DEFAULT_LIMIT = 50;
 const MAX_LIMIT = 100;
+const DEFAULT_BILL_AMOUNT = 1000;
 
 function parseLimit(raw) {
   const n = parseInt(String(raw || DEFAULT_LIMIT), 10);
@@ -15,35 +21,10 @@ function parseLimit(raw) {
   return Math.min(n, MAX_LIMIT);
 }
 
-function soapField(v) {
-  if (v == null || v === '') return '—';
-  if (typeof v === 'object') {
-    const s = JSON.stringify(v);
-    return s.length > 400 ? `${s.slice(0, 397)}…` : s;
-  }
-  const s = String(v).trim();
-  return s || '—';
-}
-
-function tipLine(t) {
-  if (t == null) return '';
-  if (typeof t === 'string') return t.trim();
-  if (typeof t === 'object') {
-    const x = t.text ?? t.tip ?? t.title ?? t.message;
-    if (x != null) return String(x).trim();
-    return JSON.stringify(t).slice(0, 200);
-  }
-  return String(t);
-}
-
-/** Single public app URL for links in WhatsApp (not comma-separated CORS list). */
-function patientFacingAppUrl() {
-  const explicit = (process.env.FRONTEND_PUBLIC_URL || '').trim().replace(/['"]/g, '');
-  if (explicit) return explicit.replace(/\/$/, '');
-  const raw = (process.env.ALLOWED_ORIGIN || 'https://careops-ai-gamma.vercel.app').trim();
-  const first = raw.split(',')[0].trim().replace(/['"]/g, '');
-  const base = first || 'https://careops-ai-gamma.vercel.app';
-  return base.replace(/\/$/, '');
+function resolveBillAmount(visit) {
+  const raw = visit?.totalAmount ?? visit?.total ?? visit?.amountTotal ?? visit?.amount;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_BILL_AMOUNT;
 }
 
 // GET /api/pharmacy/queue
@@ -61,21 +42,8 @@ router.get('/queue', verifyToken, ...authRoles('pharmacist', 'doctor'), async (r
     const prescriptions = await Promise.all(
       snapshot.docs.map(async (doc) => {
         const data = doc.data();
-        let patientPhone = '';
-
-        if (data.patientId) {
-          try {
-            const patientSnap = await db.collection('patients').doc(data.patientId).get();
-            if (patientSnap.exists) {
-              patientPhone = patientSnap.data().phone || '';
-            }
-          } catch {
-            patientPhone = '';
-          }
-        }
-        if (!patientPhone && data.patientPhone) {
-          patientPhone = String(data.patientPhone).trim();
-        }
+        const onVisit = String(data.patientPhone || '').trim();
+        const patientPhone = onVisit || (await resolvePatientPhone(db, data));
 
         return {
           id: doc.id,
@@ -104,74 +72,38 @@ router.post('/ready', verifyToken, ...authRoles('pharmacist'), async (req, res, 
       return res.status(400).json({ error: 'visitId is required' });
     }
 
-    // Step 1: Get visit document
-    const visitSnap = await db.collection('visits').doc(visitId).get();
+    const visitRef = db.collection('visits').doc(visitId);
+    const visitSnap = await visitRef.get();
     if (!visitSnap.exists) {
       return res.status(404).json({ error: 'Visit not found' });
     }
     const visit = visitSnap.data();
+    const totalAmount = resolveBillAmount(visit);
 
-    // Step 2: Patient phone — Firestore profile first, then snapshot on visit (from check-in / booking)
-    let patientPhone = '';
-    if (visit.patientId) {
-      const patientSnap = await db.collection('patients').doc(visit.patientId).get();
-      if (patientSnap.exists) {
-        patientPhone = patientSnap.data().phone || '';
-      }
-    }
-    if (!patientPhone && visit.patientPhone) {
-      patientPhone = String(visit.patientPhone).trim();
-    }
+    const patientPhone = await resolvePatientPhone(db, visit);
 
-    // Step 3: Update visit status
-    await db.collection('visits').doc(visitId).update({
+    await visitRef.update({
       prescriptionStatus: 'dispensed',
       dispensedAt: new Date(),
+      totalAmount,
     });
 
-    // Step 4: Fixed total amount ₹1000 (use SOAP plan if prescription array empty)
     const medicines = medicinesForVisit(visit);
-    const totalAmount = 1000;
+    const frontendUrl = patientFacingAppUrl();
+    const payUrl = `${frontendUrl.replace(/\/$/, '')}/payment-success?amount=${totalAmount}`;
 
-    // Step 5 & 6: Build and send WhatsApp message with SOAP notes (read visit snapshot from before status update)
     let whatsappWarning = null;
     let whatsappSent = false;
     let twilioError = null;
 
     if (patientPhone) {
-      const medicineList =
-        medicines.length > 0
-          ? medicines.map((m) => `• ${m}`).join('\n')
-          : '• (See consultation summary below — no separate medicine list on file.)';
-      const patientLabel = visit.patientName ? String(visit.patientName).trim() : 'there';
-      const frontendUrl = patientFacingAppUrl();
-
-      const soapNote = visit.soapNote || {};
-      const hasSoap = [soapNote.subjective, soapNote.objective, soapNote.assessment, soapNote.plan].some(
-        (x) => x != null && String(x).trim() !== ''
-      );
-      const soapSection = hasSoap
-        ? `\n📋 *Consultation (SOAP):*\n` +
-          `S: ${soapField(soapNote.subjective)}\n` +
-          `O: ${soapField(soapNote.objective)}\n` +
-          `A: ${soapField(soapNote.assessment)}\n` +
-          `P: ${soapField(soapNote.plan)}`
-        : '';
-
-      const healthTipsRaw = Array.isArray(visit.healthTips) ? visit.healthTips : [];
-      const tipsLines = healthTipsRaw.map(tipLine).filter(Boolean);
-      const tipsSection = tipsLines.length
-        ? `\n\n💡 *Health tips:*\n${tipsLines.map((t) => `• ${t}`).join('\n')}`
-        : '';
-
-      const payUrl = `${frontendUrl.replace(/\/$/, '')}/payment-success`;
-      const message =
-        `Hello ${patientLabel}!\nYour medicines are ready. 🎉\n\n` +
-        `💊 *Medicines:*\n${medicineList}\n\n` +
-        `💰 *Total: Rs ${totalAmount}*\n\n` +
-        `💳 *Pay (demo):* ${payUrl}` +
-        `${soapSection}${tipsSection}\n\n` +
-        `📍 Collect from Counter 2.\n— CareOps AI`;
+      const message = buildPickupWhatsAppMessage({
+        patientName: visit.patientName,
+        visit,
+        medicines,
+        totalAmount,
+        frontendUrl,
+      });
 
       try {
         await sendWhatsApp(patientPhone, message);
@@ -197,8 +129,10 @@ router.post('/ready', verifyToken, ...authRoles('pharmacist'), async (req, res, 
     res.json({
       success: true,
       totalAmount,
+      payUrl,
       whatsappSent,
       warning: whatsappWarning,
+      prescriptionLetter: visit.prescriptionLetter || '',
       ...(twilioError && { twilioError }),
     });
   } catch (err) {

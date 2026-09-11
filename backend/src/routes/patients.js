@@ -4,7 +4,7 @@ const multer = require('multer');
 const verifyToken = require('../middleware/verifyToken');
 const { authRoles } = require('../middleware/requireRole');
 const { db, admin } = require('../services/firestore');
-const { isValidPatientPhone, normalizePhoneDigits } = require('../utils/phone');
+const { isValidPatientPhone } = require('../utils/phone');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -62,22 +62,6 @@ router.post('/profile', verifyToken, ...authRoles('patient'), async (req, res, n
     const phoneCheck = isValidPatientPhone(phone);
     if (!phoneCheck.ok) {
       return res.status(400).json({ error: phoneCheck.error, code: 'INVALID_PHONE' });
-    }
-
-    const phoneNorm = phoneCheck.normalized;
-    const existing = await db.collection('patients').limit(200).get();
-    const duplicate = existing.docs.find((doc) => {
-      if (doc.id === uid) return false;
-      return normalizePhoneDigits(doc.data().phone) === phoneNorm;
-    });
-    if (duplicate) {
-      const other = duplicate.data();
-      return res.status(409).json({
-        error: `This phone is already registered to ${other.name || 'another patient'}. Search that patient instead of creating a duplicate.`,
-        code: 'DUPLICATE_PHONE',
-        existingPatientId: duplicate.id,
-        existingPatientName: other.name || '',
-      });
     }
 
     const profileData = {

@@ -15,8 +15,24 @@ const allowedOrigins = (process.env.ALLOWED_ORIGIN || '')
   .map((o) => o.trim().replace(/['"]/g, ''))
   .filter(Boolean);
 
+const localDevOrigin = /^https?:\/\/(localhost|127\.0\.0\.1):\d+$/;
+
+function isOriginAllowed(origin) {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  // Local Vite often shifts ports (5173 → 5174). Allow any localhost port in non-production.
+  if (process.env.NODE_ENV !== 'production' && localDevOrigin.test(origin)) return true;
+  return false;
+}
+
 const corsOptions = {
-  origin: allowedOrigins.length ? allowedOrigins : true,
+  origin(origin, callback) {
+    if (isOriginAllowed(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error(`CORS blocked origin: ${origin}`));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -43,6 +59,7 @@ app.use('/api/appointments', require('./routes/appointments'));
 app.use('/api/checkin', require('./routes/checkin'));
 app.use('/api/vitals', require('./routes/vitals'));
 app.use('/api/consultation', require('./routes/consultation'));
+app.use('/api/diseases', require('./routes/diseases'));
 app.use('/api/prescription', require('./routes/prescription'));
 app.use('/api/visits', require('./routes/visits'));
 app.use('/api/emergency', require('./routes/emergency'));

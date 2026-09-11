@@ -57,8 +57,21 @@ async function sendWhatsApp(toPhone, message) {
   const MAX_BODY = 1580;
   let body = String(message ?? '');
   if (body.length > MAX_BODY) {
-    console.warn('[Twilio] Message length', body.length, 'exceeds limit; truncating to', MAX_BODY);
-    body = `${body.slice(0, MAX_BODY - 24)}\n… (message truncated)`;
+    const payIdx = body.search(/(?:https?:\/\/|upi:\/\/)[^\s]+/);
+    if (payIdx >= 0) {
+      const linkEnd = body.indexOf('\n', payIdx);
+      const headEnd = linkEnd >= 0 ? linkEnd : payIdx + 120;
+      const head = body.slice(0, headEnd);
+      const rest = body.slice(headEnd);
+      const budget = MAX_BODY - head.length - 40;
+      body =
+        budget > 80
+          ? `${head}${rest.slice(0, budget)}\n… (tap WhatsApp pay link above)`
+          : `${head}\n… (tap WhatsApp pay link above)`;
+    } else {
+      body = `${body.slice(0, MAX_BODY - 24)}\n… (message truncated)`;
+    }
+    console.warn('[Twilio] Message trimmed to', body.length, 'chars (pay link preserved)');
   }
 
   try {
