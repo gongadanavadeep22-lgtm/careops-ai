@@ -62,7 +62,7 @@ export default function PatientDashboard() {
   const [doctors, setDoctors] = useState([]);
   const [doctorsLoading, setDoctorsLoading] = useState(false);
   const [profileReady, setProfileReady] = useState(false);
-  const [apptForm, setApptForm] = useState({ doctorId: '', scheduledAt: '', apptSymptoms: '' });
+  const [apptForm, setApptForm] = useState({ doctorId: '', scheduledDate: '' });
   const [apptLoading, setApptLoading] = useState(false);
   const [apptStatus, setApptStatus] = useState('');
   const [apptError, setApptError] = useState('');
@@ -144,19 +144,24 @@ export default function PatientDashboard() {
     setApptError('');
 
     if (!apptForm.doctorId) return setApptError('Please select a doctor.');
-    if (!apptForm.scheduledAt) return setApptError('Please select a date and time.');
-    if (!apptForm.apptSymptoms || apptForm.apptSymptoms.trim().length < 10) {
-      return setApptError('Please describe your symptoms (minimum 10 characters).');
-    }
+    if (!apptForm.scheduledDate) return setApptError('Please select a date.');
 
     setApptLoading(true);
     try {
       const { data: patient } = await client.get('/api/patients/profile');
       if (!String(patient.phone || '').trim()) {
-        setApptLoading(false);
         return setApptError('Add your phone number under Profile and save, then book again.');
       }
+      const savedSymptoms = String(patient.symptoms || '').trim();
+      if (savedSymptoms.length < 10) {
+        return setApptError(
+          'Save your symptoms under Symptoms & Allergies first (minimum 10 characters), then book again.'
+        );
+      }
       const selectedDoctor = doctors.find((d) => d.id === apptForm.doctorId);
+
+      const [year, month, day] = apptForm.scheduledDate.split('-').map(Number);
+      const scheduledAt = new Date(year, month - 1, day, 9, 0, 0).toISOString();
 
       await client.post('/api/appointments/book', {
         patientId: patient.uid || '',
@@ -165,18 +170,33 @@ export default function PatientDashboard() {
         patientArea: patient.area || '',
         doctorId: selectedDoctor?.uid || apptForm.doctorId,
         doctorName: selectedDoctor?.name || '',
-        scheduledAt: apptForm.scheduledAt,
-        symptoms: apptForm.apptSymptoms.trim(),
+        scheduledAt,
+        symptoms: savedSymptoms,
       });
 
       setApptStatus('Appointment booked successfully. Doctor will confirm shortly.');
-      setApptForm({ doctorId: '', scheduledAt: '', apptSymptoms: '' });
+      setApptForm({ doctorId: '', scheduledDate: '' });
     } catch (err) {
       setApptError(err.response?.data?.error || 'Booking failed. Please try again.');
     } finally {
       setApptLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (activeSection !== 'Lab Reports') return;
+
+    async function loadLabReports() {
+      try {
+        const { data } = await client.get('/api/patients/profile');
+        setLabReports(data.labReports || []);
+      } catch {
+        /* keep existing list */
+      }
+    }
+
+    loadLabReports();
+  }, [activeSection]);
 
   async function handleFileUpload(e) {
     const file = e.target.files[0];
@@ -189,10 +209,9 @@ export default function PatientDashboard() {
     formData.append('file', file);
 
     try {
-      const { data } = await client.post('/api/patients/lab-reports', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      });
-      setLabReports((prev) => [...prev, data.report]);
+      await client.post('/api/patients/lab-reports', formData);
+      const { data: profile } = await client.get('/api/patients/profile');
+      setLabReports(profile.labReports || []);
       setUploadStatus('Uploaded successfully!');
       setTimeout(() => setUploadStatus(''), 3000);
     } catch (err) {
@@ -431,27 +450,20 @@ export default function PatientDashboard() {
                     </select>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Date &amp; time *</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Date *</label>
                     <input
-                      type="datetime-local"
-                      value={apptForm.scheduledAt}
-                      min={new Date().toISOString().slice(0, 16)}
-                      onChange={(e) => setApptForm((prev) => ({ ...prev, scheduledAt: e.target.value }))}
+                      type="date"
+                      value={apptForm.scheduledDate}
+                      min={new Date().toISOString().slice(0, 10)}
+                      onChange={(e) => setApptForm((prev) => ({ ...prev, scheduledDate: e.target.value }))}
                       required
                       className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
                     />
                   </div>
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Symptoms *</label>
-                    <textarea
-                      value={apptForm.apptSymptoms}
-                      onChange={(e) => setApptForm((prev) => ({ ...prev, apptSymptoms: e.target.value }))}
-                      placeholder="Describe your symptoms (minimum 10 characters)"
-                      rows={4}
-                      required
-                      className="w-full rounded-lg border border-gray-200 px-3 py-2.5 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 resize-none"
-                    />
-                  </div>
+                  <p className="text-xs text-gray-500">
+                    Your saved symptoms from the <strong>Symptoms &amp; Allergies</strong> tab will be shared with
+                    the doctor when you book.
+                  </p>
                   {apptStatus && (
                     <p className="text-sm text-medical-green bg-green-50 border border-green-200 rounded-lg px-3 py-2">
                       {apptStatus}
@@ -510,8 +522,8 @@ export default function PatientDashboard() {
               <p className="text-gray-400 text-sm text-center py-8">No lab reports uploaded yet.</p>
             ) : (
               <ul className="mt-6 divide-y divide-gray-100 rounded-lg border border-gray-100">
-                {labReports.map((report, i) => (
-                  <li key={i} className="flex items-center justify-between gap-4 px-4 py-3">
+                {labReports.map((report) => (
+                  <li key={report.storagePath || report.url || report.name} className="flex items-center justify-between gap-4 px-4 py-3">
                     <div className="flex items-start gap-3 min-w-0">
                       <File className="h-5 w-5 shrink-0 text-gray-400 mt-0.5" aria-hidden />
                       <div className="min-w-0">

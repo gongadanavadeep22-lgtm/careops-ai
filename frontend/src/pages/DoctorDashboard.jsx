@@ -15,6 +15,7 @@ import {
   Activity,
   Plus,
   Trash2,
+  FileText,
 } from 'lucide-react';
 
 const URGENCY_ORDER = { EMERGENCY: 0, PRIORITY: 1, GENERAL: 2 };
@@ -523,6 +524,48 @@ export default function DoctorDashboard() {
                         </div>
                       );
                     })()}
+                  </div>
+
+                  <div className="rounded-xl border border-violet-100 bg-violet-50/80 p-4">
+                    <h4 className="text-sm font-bold text-violet-900 mb-2 flex items-center gap-2">
+                      <FileText className="h-4 w-4 shrink-0" aria-hidden />
+                      {t('doctor.labReports')}
+                    </h4>
+                    {!patient?.labReports?.length ? (
+                      <p className="text-xs text-violet-800/70">{t('doctor.noLabReports')}</p>
+                    ) : (
+                      <ul className="space-y-2">
+                        {patient.labReports.map((report) => (
+                          <li
+                            key={report.storagePath || report.url || report.name}
+                            className="flex items-center justify-between gap-3 rounded-lg border border-violet-100 bg-white/80 px-3 py-2"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-xs font-medium text-gray-900 truncate">{report.name}</p>
+                              {report.uploadedAt && (
+                                <p className="text-[10px] text-gray-500">
+                                  {new Date(report.uploadedAt).toLocaleDateString('en-IN', {
+                                    day: 'numeric',
+                                    month: 'short',
+                                    year: 'numeric',
+                                  })}
+                                </p>
+                              )}
+                            </div>
+                            {report.url ? (
+                              <a
+                                href={report.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-xs font-semibold text-primary-600 hover:underline shrink-0"
+                              >
+                                {t('doctor.viewReport')}
+                              </a>
+                            ) : null}
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                   </div>
 
                   {visit?.vitals && Object.keys(visit.vitals).length > 0 && (

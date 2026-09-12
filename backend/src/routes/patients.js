@@ -5,6 +5,7 @@ const verifyToken = require('../middleware/verifyToken');
 const { authRoles } = require('../middleware/requireRole');
 const { db, admin } = require('../services/firestore');
 const { isValidPatientPhone } = require('../utils/phone');
+const { saveLabReportFile, withFreshLabReportUrls } = require('../utils/labReports');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -40,7 +41,9 @@ router.get('/profile', verifyToken, ...authRoles('patient'), async (req, res, ne
       });
     }
 
-    res.json({ ...doc.data(), uid: req.user.uid });
+    const data = doc.data();
+    const labReports = await withFreshLabReportUrls(data.labReports || []);
+    res.json({ ...data, uid: req.user.uid, labReports });
   } catch (err) {
     next(err);
   }
@@ -94,26 +97,20 @@ router.post('/lab-reports', verifyToken, ...authRoles('patient'), upload.single(
     }
 
     const uid = req.user.uid;
-    const bucket = admin.storage().bucket();
     const timestamp = Date.now();
     const safeName = req.file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_');
     const filePath = `lab-reports/${uid}/${timestamp}_${safeName}`;
-    const fileRef = bucket.file(filePath);
 
-    await fileRef.save(req.file.buffer, {
-      metadata: { contentType: req.file.mimetype },
-    });
-
-    const expires = Date.now() + 7 * 24 * 60 * 60 * 1000;
-    const [signedUrl] = await fileRef.getSignedUrl({
-      action: 'read',
-      expires,
-    });
+    const { url, storagePath } = await saveLabReportFile(
+      req.file.buffer,
+      filePath,
+      req.file.mimetype
+    );
 
     const reportEntry = {
       name: req.file.originalname,
-      url: signedUrl,
-      storagePath: filePath,
+      url,
+      storagePath,
       uploadedAt: new Date().toISOString(),
     };
 
@@ -206,7 +203,13 @@ router.get('/by-id', verifyToken, ...authRoles('doctor', 'nurse', 'pharmacist', 
 
     const doc = await db.collection('patients').doc(patientId).get();
 
-    res.json({ patient: doc.exists ? { id: doc.id, ...doc.data() } : null });
+    if (!doc.exists) {
+      return res.json({ patient: null });
+    }
+
+    const data = doc.data();
+    const labReports = await withFreshLabReportUrls(data.labReports || []);
+    res.json({ patient: { id: doc.id, ...data, labReports } });
   } catch (err) {
     next(err);
   }
